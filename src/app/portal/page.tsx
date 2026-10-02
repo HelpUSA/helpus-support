@@ -976,26 +976,56 @@ export default function ClientPortalPage() {
                       Status: {getStatusLabel(selectedTicket.status)}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-200 leading-relaxed">
-                    Como Administrador Master, você pode <strong>Aceitar e Executar Alterações Autônomas</strong> no código (compilar e enviar para a nuvem Vercel), ou <strong>Rejeitar / Recusar</strong> este chamado a qualquer momento.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-3 pt-1">
-                    <button
-                      onClick={() => setIsApproveModalOpen(true)}
-                      disabled={isActionLoading}
-                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all cursor-pointer"
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Aceitar & Executar Alterações (Deploy Vercel)
-                    </button>
 
-                    <button
-                      onClick={() => setIsRejectModalOpen(true)}
-                      disabled={isActionLoading}
-                      className="px-4 py-2.5 bg-red-600/80 hover:bg-red-600 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all cursor-pointer"
-                    >
-                      <XCircle className="w-4 h-4" /> Rejeitar / Recusar Chamado
-                    </button>
-                  </div>
+                  {selectedTicket.status === 'pending_approval' ? (
+                    <>
+                      <p className="text-xs text-slate-200 leading-relaxed">
+                        Como Administrador Master, você pode <strong>Aceitar e Executar Alterações Autônomas</strong> no código (compilar e enviar para a nuvem Vercel), ou <strong>Rejeitar / Recusar</strong> este chamado a qualquer momento.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-3 pt-1">
+                        <button
+                          onClick={() => setIsApproveModalOpen(true)}
+                          disabled={isActionLoading}
+                          className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-4 h-4" /> Aceitar & Executar Alterações (Deploy Vercel)
+                        </button>
+
+                        <button
+                          onClick={() => setIsRejectModalOpen(true)}
+                          disabled={isActionLoading}
+                          className="px-4 py-2.5 bg-red-600/80 hover:bg-red-600 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all cursor-pointer"
+                        >
+                          <XCircle className="w-4 h-4" /> Rejeitar / Recusar Chamado
+                        </button>
+                      </div>
+                    </>
+                  ) : selectedTicket.status === 'in_production' ? (
+                    <div className="p-3 bg-purple-950/60 border border-purple-500/40 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-purple-300 flex items-center gap-2">
+                          <Cpu className="w-4 h-4 text-purple-400 animate-spin" />
+                          ⚡ Chamado Aprovado — Produção Iniciada!
+                        </span>
+                        <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
+                          Deploy em Andamento
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        O robô autônomo está compilando o código e enviando a atualização para a nuvem Vercel. O status atualizará para <strong>Concluído</strong> assim que o deploy finalizar.
+                      </p>
+                    </div>
+                  ) : selectedTicket.status === 'resolved' ? (
+                    <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-xl space-y-1">
+                      <span className="text-xs font-bold text-emerald-300 flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        ✨ Chamado Aprovado, Solucionado e Publicado em Produção!
+                      </span>
+                      <p className="text-[11px] text-slate-300">
+                        Todas as alterações foram testadas e implantadas com sucesso na Vercel Cloud.
+                      </p>
+                    </div>
+                  ) : null}
                 </div>
               )}
 

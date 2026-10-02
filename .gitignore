@@ -1,0 +1,7 @@
+node_modules/
+.next/
+.vercel/
+*.log
+scratch/
+pending_ticket_trigger.json
+open_window_titles.txt

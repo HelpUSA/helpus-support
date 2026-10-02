@@ -68,6 +68,20 @@ export const INITIAL_USERS: UserAccount[] = [
     allowedTenantIds: ['publicarte'],
     status: 'active',
   },
+  {
+    id: 'usr-kaline',
+    username: 'kaline',
+    email: 'augustokaline3@gmail.com',
+    name: 'Kaline Augusto (Kaline Modas)',
+    role: 'client_admin',
+    tenantId: 'kaline-modas',
+    tenantName: 'Kaline Modas',
+    avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=KalineModas',
+    googleEmail: 'augustokaline3@gmail.com',
+    hasSupportAccess: true,
+    allowedTenantIds: ['kaline-modas'],
+    status: 'active',
+  },
 ];
 
 const AUTH_STORAGE_KEY = 'helpus_auth_user_v2';
@@ -141,8 +155,9 @@ export class AuthService {
       if (avatarUrl) userAccount.avatarUrl = avatarUrl;
     } else {
       const isEduardo = cleanEmail.includes('eduardo');
-      const userTenantId = isEduardo ? 'neuro.eduardomagalhaes' : 'publicarte';
-      const userTenantName = isEduardo ? 'Dr. Eduardo Magalhães Neurologista' : 'Public Arte';
+      const isKaline = cleanEmail.includes('kaline') || cleanEmail.includes('augustokaline');
+      const userTenantId = isKaline ? 'kaline-modas' : (isEduardo ? 'neuro.eduardomagalhaes' : 'publicarte');
+      const userTenantName = isKaline ? 'Kaline Modas' : (isEduardo ? 'Dr. Eduardo Magalhães Neurologista' : 'Public Arte');
 
       userAccount = {
         id: `usr-google-${Date.now()}`,
@@ -150,7 +165,7 @@ export class AuthService {
         email: cleanEmail,
         googleEmail: cleanEmail,
         name: name || cleanEmail.split('@')[0],
-        role: isEduardo ? 'admin' : 'client_user',
+        role: (isKaline || isEduardo) ? 'client_admin' : 'client_user',
         tenantId: userTenantId,
         tenantName: userTenantName,
         avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanEmail}`,

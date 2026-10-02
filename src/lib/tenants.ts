@@ -1,6 +1,7 @@
 import { Tenant } from '@/types/ticket';
 
 export const INITIAL_TENANTS: Tenant[] = [
+  { id: 'kaline-modas', name: 'Kaline Modas', slug: 'kaline-modas', domain: 'kalinemodas.helpusbr.com', primaryColor: '#db2777', apiKey: 'kal_live_91823746k', createdAt: '2026-10-02T12:00:00Z' },
   { id: 'publicarte', name: 'Public Arte', slug: 'publicarte', domain: 'publicarte.helpusbr.com', primaryColor: '#6366f1', apiKey: 'pub_live_79812491a', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'accounting', name: 'HelpUS Accounting (NFS-e Suite)', slug: 'accounting', domain: 'accounting.helpusbr.com', primaryColor: '#2563eb', apiKey: 'acc_live_10293847d', createdAt: '2026-09-12T10:00:00Z' },
   { id: 'advert', name: 'Advert Marketing', slug: 'advert', domain: 'advert.helpusbr.com', primaryColor: '#3b82f6', apiKey: 'adv_live_001', createdAt: '2026-09-01T10:00:00Z' },

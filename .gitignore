@@ -5,3 +5,5 @@ node_modules/
 scratch/
 pending_ticket_trigger.json
 open_window_titles.txt
+
+.vercel

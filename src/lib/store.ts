@@ -18,12 +18,16 @@ let cloudSha: string | null = null;
 
 async function fetchGitHubTickets(): Promise<Ticket[]> {
   try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'HelpUS-Support-Hub',
+      Accept: 'application/vnd.github+json',
+    };
+    if (GITHUB_TOKEN && GITHUB_TOKEN.trim()) {
+      headers.Authorization = `Bearer ${GITHUB_TOKEN.trim()}`;
+    }
+
     const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
-      headers: {
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        'User-Agent': 'HelpUS-Support-Hub',
-        Accept: 'application/vnd.github+json',
-      },
+      headers,
       cache: 'no-store',
     });
     if (res.ok) {
@@ -33,21 +37,44 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
       const tickets: Ticket[] = JSON.parse(content);
       return tickets;
     }
+
+    // Fallback: Fetch raw GitHub content directly
+    const rawRes = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}`, {
+      cache: 'no-store',
+    });
+    if (rawRes.ok) {
+      const tickets: Ticket[] = await rawRes.json();
+      return tickets;
+    }
   } catch (err) {
     console.error('Error fetching tickets from GitHub:', err);
+    try {
+      const rawRes = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}`, {
+        cache: 'no-store',
+      });
+      if (rawRes.ok) {
+        const tickets: Ticket[] = await rawRes.json();
+        return tickets;
+      }
+    } catch {}
   }
   return [];
 }
 
 async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
+  if (!GITHUB_TOKEN || !GITHUB_TOKEN.trim()) return;
+
   try {
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${GITHUB_TOKEN.trim()}`,
+      'User-Agent': 'HelpUS-Support-Hub',
+      'Content-Type': 'application/json',
+      Accept: 'application/vnd.github+json',
+    };
+
     if (!cloudSha) {
       const check = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
-        headers: {
-          Authorization: `Bearer ${GITHUB_TOKEN}`,
-          'User-Agent': 'HelpUS-Support-Hub',
-          Accept: 'application/vnd.github+json',
-        },
+        headers,
         cache: 'no-store',
       });
       if (check.ok) {
@@ -58,12 +85,7 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
 
     const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
       method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${GITHUB_TOKEN}`,
-        'User-Agent': 'HelpUS-Support-Hub',
-        'Content-Type': 'application/json',
-        Accept: 'application/vnd.github+json',
-      },
+      headers,
       body: JSON.stringify({
         message: 'db(sync): update tickets database in cloud',
         content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),

@@ -49,7 +49,7 @@ export async function PATCH(
     }
 
     if (body.action === 'approve') {
-      const updated = await ticketStore.startTicketProductionAsync(
+      const { ticket: updated, cloudSaveResult } = await ticketStore.startTicketProductionAsync(
         id,
         body.agentName || 'HelpUS Master',
         body.adminNotes,
@@ -59,8 +59,7 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
       }
 
-      // Ticket enters production status ('in_production') for local Antigravity Watcher execution
-      return NextResponse.json({ success: true, data: updated });
+      return NextResponse.json({ success: true, data: updated, cloudSaveResult });
     }
 
     if (body.action === 'complete' || body.action === 'resolve') {

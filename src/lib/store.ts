@@ -241,8 +241,10 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
   return [];
 }
 
-async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
-  if (!GITHUB_TOKEN || !GITHUB_TOKEN.trim()) return;
+async function saveGitHubTickets(tickets: Ticket[]): Promise<{ success: boolean; error?: string }> {
+  if (!GITHUB_TOKEN || !GITHUB_TOKEN.trim()) {
+    return { success: false, error: 'No GITHUB_TOKEN configured' };
+  }
 
   try {
     const headers: Record<string, string> = {
@@ -261,6 +263,10 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
       const d = await check.json();
       latestSha = d.sha;
       cloudSha = d.sha;
+    } else {
+      const checkErr = await check.text();
+      console.error('Check SHA failed:', check.status, checkErr);
+      return { success: false, error: `Check SHA failed (${check.status}): ${checkErr}` };
     }
 
     const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
@@ -278,12 +284,15 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
       const d = await res.json();
       cloudSha = d?.content?.sha || cloudSha;
       console.log('Successfully saved tickets to GitHub Cloud database!');
+      return { success: true };
     } else {
       const errText = await res.text();
       console.error(`GitHub API PUT failed status ${res.status}:`, errText);
+      return { success: false, error: `GitHub PUT failed (${res.status}): ${errText}` };
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error('Error saving tickets to GitHub:', err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 
@@ -340,9 +349,10 @@ class TicketStore {
     }
   }
 
-  async saveAsync(): Promise<void> {
+  async saveAsync(): Promise<{ success: boolean; error?: string }> {
     if (typeof window !== 'undefined') {
       localStorage.setItem('helpus_tickets_v1', JSON.stringify(this.tickets));
+      return { success: true };
     } else {
       try {
         const filePath = this.getStoragePath();
@@ -351,9 +361,10 @@ class TicketStore {
         console.error('Server storage save error', e);
       }
       try {
-        await saveGitHubTickets(this.tickets);
-      } catch (err) {
+        return await saveGitHubTickets(this.tickets);
+      } catch (err: any) {
         console.error('Cloud save failed in saveAsync', err);
+        return { success: false, error: err?.message || String(err) };
       }
     }
   }
@@ -561,12 +572,13 @@ class TicketStore {
     agentName: string = 'HelpUS Master',
     adminNotes?: string,
     fallbackTicket?: Ticket
-  ): Promise<Ticket | undefined> {
+  ): Promise<{ ticket?: Ticket; cloudSaveResult?: { success: boolean; error?: string } }> {
     const ticket = this.startTicketProduction(ticketId, agentName, adminNotes, fallbackTicket);
+    let cloudSaveResult;
     if (ticket) {
-      await this.saveAsync();
+      cloudSaveResult = await this.saveAsync();
     }
-    return ticket;
+    return { ticket, cloudSaveResult };
   }
 
   completeTicketProduction(

@@ -665,6 +665,8 @@ class TicketStore {
     if (!ticket) return undefined;
 
     ticket.status = 'pending_approval';
+    ticket.progressPercentage = 0;
+    delete ticket.progressStep;
     ticket.updatedAt = new Date().toISOString();
     ticket.messages = [
       {

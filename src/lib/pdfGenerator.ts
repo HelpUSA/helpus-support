@@ -273,7 +273,7 @@ export function generateTicketPDFReport(ticket: Ticket): void {
         </div>
         <div class="meta-item">
           <span class="meta-label">Status da Solicitação</span>
-          <span class="meta-val" style="color: #059669;">${ticket.status.toUpperCase()}</span>
+          <span class="meta-val" style="color: #059669;">${(ticket.status || 'resolved').toUpperCase()}</span>
         </div>
         <div class="meta-item">
           <span class="meta-label">Data de Abertura</span>

@@ -778,14 +778,14 @@ class TicketStore {
       senderName: 'Sistema',
       senderRole: 'system',
       isInternalNote: false,
-      content: `Status alterado para "${status.toUpperCase()}" por ${assignedTo || 'Atendente'}.`,
+      content: `Status alterado para "${(status || 'pending_approval').toUpperCase()}" por ${assignedTo || 'Atendente'}.`,
       createdAt: new Date().toISOString(),
     });
 
     this.save();
 
     // Trigger WhatsApp & Email Alert for Status Update
-    notificationService.notifyTicketUpdated(ticket, `Status alterado para ${status.toUpperCase()} por ${assignedTo || 'Atendente'}.`);
+    notificationService.notifyTicketUpdated(ticket, `Status alterado para ${(status || 'pending_approval').toUpperCase()} por ${assignedTo || 'Atendente'}.`);
 
     return ticket;
   }

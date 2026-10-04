@@ -93,7 +93,7 @@ https://support.helpusbr.com/portal (Faça login como "helpus")
 HELPUS SUPPORT HUB — ALERTA DE ATUALIZAÇÃO / SOLUÇÃO
 ==================================================
 
-O chamado ${ticket.code} foi atualizado para [${ticket.status.toUpperCase()}].
+O chamado ${ticket.code} foi atualizado para [${(ticket.status || 'pending_approval').toUpperCase()}].
 
 DETALHES DO CHAMADO:
 - Código: ${ticket.code}

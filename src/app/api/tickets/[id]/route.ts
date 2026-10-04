@@ -125,14 +125,17 @@ export async function PATCH(
       return NextResponse.json({ success: true, data: updated });
     }
 
-    const updated = ticketStore.updateTicketStatus(id, body.status, body.assignedTo);
-    if (!updated) {
-      return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+    if (body.status) {
+      const updated = ticketStore.updateTicketStatus(id, body.status, body.assignedTo);
+      if (!updated) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, data: updated });
     }
 
-    return NextResponse.json({ success: true, data: updated });
+    return NextResponse.json({ success: false, error: 'Ação não especificada ou inválida' }, { status: 400 });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: error.stack || error.message }, { status: 500 });
   }
 }
 

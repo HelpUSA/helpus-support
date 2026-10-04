@@ -192,6 +192,18 @@ let cloudSha: string | null = null;
 
 async function fetchGitHubTickets(): Promise<Ticket[]> {
   try {
+    const rawRes = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    if (rawRes.ok) {
+      const tickets: Ticket[] = await rawRes.json();
+      return tickets;
+    }
+  } catch (err) {
+    console.error('Error fetching tickets from raw GitHub:', err);
+  }
+
+  try {
     const headers: Record<string, string> = {
       'User-Agent': 'HelpUS-Support-Hub',
       Accept: 'application/vnd.github+json',
@@ -211,26 +223,8 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
       const tickets: Ticket[] = JSON.parse(content);
       return tickets;
     }
-
-    // Fallback: Fetch raw GitHub content directly
-    const rawRes = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}`, {
-      cache: 'no-store',
-    });
-    if (rawRes.ok) {
-      const tickets: Ticket[] = await rawRes.json();
-      return tickets;
-    }
   } catch (err) {
-    console.error('Error fetching tickets from GitHub:', err);
-    try {
-      const rawRes = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}`, {
-        cache: 'no-store',
-      });
-      if (rawRes.ok) {
-        const tickets: Ticket[] = await rawRes.json();
-        return tickets;
-      }
-    } catch {}
+    console.error('Error fetching tickets from GitHub API:', err);
   }
   return [];
 }

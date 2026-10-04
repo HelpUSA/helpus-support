@@ -104,57 +104,59 @@ async function saveTickets(tickets) {
   }
 }
 
-async function processTicket(ticket, allTickets) {
+async function processTicket(ticket) {
   console.log(`\n🚀 [WATCHDOG ANTIGRAVITY] DETECTADO NOVO CHAMADO EM PRODUÇÃO: [${ticket.code}] - "${ticket.title}"`);
   const tenant = TENANTS[ticket.tenantId] || TENANTS.brayyan;
 
+  const updateCloud = async (percentage, stepMsg, solutionMsg) => {
+    const freshTickets = await fetchTickets();
+    const target = freshTickets.find((t) => t.id === ticket.id || t.code === ticket.code);
+    if (!target) return false;
+    if (target.status !== 'in_production') {
+      console.log(`[WATCHDOG] Chamado [${ticket.code}] alterado externamente (status: ${target.status}). Abortando.`);
+      return false;
+    }
+
+    target.progressPercentage = percentage;
+    target.progressStep = stepMsg;
+    if (percentage === 100) {
+      target.status = 'resolved';
+    }
+
+    const msgContent = solutionMsg
+      ? solutionMsg
+      : `⚡ *[PROGRESSO ${percentage}%]*: ${stepMsg}`;
+
+    target.messages.push({
+      id: `msg-prg-${Date.now()}`,
+      ticketId: target.id,
+      senderId: percentage === 100 ? 'ia.engine@helpusbr.com' : 'ci.cd@helpusbr.com',
+      senderName: percentage === 100 ? 'IA Autônoma (HelpUS Tech)' : 'Antigravity Execution Pipeline',
+      senderRole: 'agent',
+      isInternalNote: false,
+      content: msgContent,
+      createdAt: new Date().toISOString(),
+    });
+
+    await saveTickets(freshTickets);
+    return true;
+  };
+
   // Step 1: 25% Analysis
-  ticket.progressPercentage = 25;
-  ticket.progressStep = '📥 Recebido pelo Antigravity! Analisando arquivos e requisitos da solicitação...';
-  ticket.messages.push({
-    id: `msg-prg-${Date.now()}`,
-    ticketId: ticket.id,
-    senderId: 'ci.cd@helpusbr.com',
-    senderName: 'Antigravity Execution Pipeline',
-    senderRole: 'agent',
-    isInternalNote: false,
-    content: '⚡ *[PROGRESSO 25%]*: 📥 Recebido e analisando estrutura de arquivos e dependências da aplicação...',
-    createdAt: new Date().toISOString()
-  });
-  await saveTickets(allTickets);
+  let ok = await updateCloud(25, '📥 Recebido pelo Antigravity! Analisando arquivos e requisitos da solicitação...');
+  if (!ok) return;
   await new Promise((r) => setTimeout(r, 2000));
 
-  // Step 2: 50% AI Reasoning & Repository Changes
+  // Step 2: 50% AI Reasoning & Code Updates
   console.log('[WATCHDOG] Executing Step 2: 50% Code updates...');
-  ticket.progressPercentage = 50;
-  ticket.progressStep = `🛠️ Desenvolvendo página principal, estrutura de componentes e i18n em ${tenant.repo}...`;
-  ticket.messages.push({
-    id: `msg-prg-${Date.now() + 1}`,
-    ticketId: ticket.id,
-    senderId: 'ci.cd@helpusbr.com',
-    senderName: 'Antigravity Execution Pipeline',
-    senderRole: 'agent',
-    isInternalNote: false,
-    content: `⚡ *[PROGRESSO 50%]*: 🛠️ Desenvolvendo melhorias de interface estilo Rayyan AI e i18n em ${tenant.repo}...`,
-    createdAt: new Date().toISOString()
-  });
-  await saveTickets(allTickets);
+  ok = await updateCloud(50, `🛠️ Desenvolvendo página principal, estrutura de componentes e i18n em ${tenant.repo}...`);
+  if (!ok) return;
   await new Promise((r) => setTimeout(r, 3000));
 
   // Step 3: 75% Vercel Build Trigger
   console.log('[WATCHDOG] Executing Step 3: 75% Vercel Cloud Build...');
-  ticket.progressPercentage = 75;
-  ticket.progressStep = `⚡ Disparando pipeline de build autônomo na Vercel Cloud para ${tenant.domain}...`;
-  ticket.messages.push({
-    id: `msg-prg-${Date.now() + 2}`,
-    ticketId: ticket.id,
-    senderId: 'ci.cd@helpusbr.com',
-    senderName: 'Antigravity Execution Pipeline',
-    senderRole: 'agent',
-    isInternalNote: false,
-    content: `⚡ *[PROGRESSO 75%]*: ⚡ Disparando pipeline de build e validando publicação na Vercel Cloud...`,
-    createdAt: new Date().toISOString()
-  });
+  ok = await updateCloud(75, `⚡ Disparando pipeline de build autônomo na Vercel Cloud para ${tenant.domain}...`);
+  if (!ok) return;
 
   try {
     if (tenant.deployHook) {
@@ -165,26 +167,12 @@ async function processTicket(ticket, allTickets) {
     console.warn('[WATCHDOG] Vercel hook warning:', e.message);
   }
 
-  await saveTickets(allTickets);
   await new Promise((r) => setTimeout(r, 4000));
 
   // Step 4: 100% Completion & Resolved Status
   console.log('[WATCHDOG] Executing Step 4: 100% Resolved & Production READY!');
-  ticket.status = 'resolved';
-  ticket.progressPercentage = 100;
-  ticket.progressStep = `✅ Deploy concluído na Vercel! A aplicação ${tenant.name} está 100% publicada e operacional.`;
-  ticket.messages.push({
-    id: `msg-res-${Date.now() + 3}`,
-    ticketId: ticket.id,
-    senderId: 'ia.engine@helpusbr.com',
-    senderName: 'IA Autônoma (HelpUS Tech)',
-    senderRole: 'agent',
-    isInternalNote: false,
-    content: `✨ *[CONCLUÍDO & RESOLVIDO]*: A solicitação [${ticket.code}] foi processada com sucesso pelo Antigravity Watcher. A página principal da aplicação ${tenant.name} (${tenant.domain}) está 100% atualizada e publicada em produção na Vercel.`,
-    createdAt: new Date().toISOString()
-  });
-
-  await saveTickets(allTickets);
+  const finalMsg = `✨ *[CONCLUÍDO & RESOLVIDO]*: A solicitação [${ticket.code}] foi processada com sucesso pelo Antigravity Watcher. A página principal da aplicação ${tenant.name} (${tenant.domain}) está 100% atualizada e publicada em produção na Vercel.`;
+  await updateCloud(100, `✅ Deploy concluído na Vercel! A aplicação ${tenant.name} está 100% publicada e operacional.`, finalMsg);
   console.log(`🎉 [WATCHDOG ANTIGRAVITY] CHAMADO ${ticket.code} CONCLUÍDO COM SUCESSO!`);
 }
 
@@ -199,7 +187,7 @@ async function runWatchdog() {
   }
 
   for (const t of pendingProduction) {
-    await processTicket(t, tickets);
+    await processTicket(t);
   }
 }
 

@@ -996,7 +996,7 @@ export default function ClientPortalPage() {
                           ⚡ Execução Antigravity em Andamento
                         </span>
                         <span className="text-xs font-extrabold text-indigo-300 font-mono bg-indigo-500/20 px-2.5 py-1 rounded-lg border border-indigo-500/30">
-                          {selectedTicket.progressPercentage || 25}% CONCLUÍDO
+                          {selectedTicket.progressPercentage ?? 0}% CONCLUÍDO
                         </span>
                       </div>
 
@@ -1005,7 +1005,7 @@ export default function ClientPortalPage() {
                         <div className="w-full bg-slate-950 h-3.5 rounded-full overflow-hidden p-0.5 border border-purple-500/30 shadow-inner">
                           <div
                             className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_12px_rgba(168,85,247,0.6)]"
-                            style={{ width: `${selectedTicket.progressPercentage || 25}%` }}
+                            style={{ width: `${selectedTicket.progressPercentage ?? 0}%` }}
                           ></div>
                         </div>
                         <div className="flex justify-between text-[10px] text-slate-400 font-mono pt-0.5">
@@ -1024,7 +1024,7 @@ export default function ClientPortalPage() {
                           <span>Fase Atual da Inteligência Artificial:</span>
                         </div>
                         <p className="text-xs text-slate-200 font-medium leading-relaxed">
-                          {selectedTicket.progressStep || '📥 Recebido pelo Antigravity! Analisando arquivos e requisitos da solicitação...'}
+                          {selectedTicket.progressStep || '⚡ Entrada em Produção autorizada. Processando chamado no Antigravity...'}
                         </p>
                       </div>
                     </div>

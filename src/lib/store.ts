@@ -204,18 +204,6 @@ let cloudSha: string | null = null;
 
 async function fetchGitHubTickets(): Promise<Ticket[]> {
   try {
-    const rawRes = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, {
-      cache: 'no-store',
-    });
-    if (rawRes.ok) {
-      const tickets: Ticket[] = await rawRes.json();
-      return tickets;
-    }
-  } catch (err) {
-    console.error('Error fetching tickets from raw GitHub:', err);
-  }
-
-  try {
     const headers: Record<string, string> = {
       'User-Agent': 'HelpUS-Support-Hub',
       Accept: 'application/vnd.github+json',
@@ -224,7 +212,7 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
       headers.Authorization = `Bearer ${GITHUB_TOKEN.trim()}`;
     }
 
-    const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
+    const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, {
       headers,
       cache: 'no-store',
     });
@@ -237,6 +225,18 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
     }
   } catch (err) {
     console.error('Error fetching tickets from GitHub API:', err);
+  }
+
+  try {
+    const rawRes = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, {
+      cache: 'no-store',
+    });
+    if (rawRes.ok) {
+      const tickets: Ticket[] = await rawRes.json();
+      return tickets;
+    }
+  } catch (err) {
+    console.error('Error fetching tickets from raw GitHub:', err);
   }
   return [];
 }
@@ -252,15 +252,15 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
       Accept: 'application/vnd.github+json',
     };
 
-    if (!cloudSha) {
-      const check = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
-        headers,
-        cache: 'no-store',
-      });
-      if (check.ok) {
-        const d = await check.json();
-        cloudSha = d.sha;
-      }
+    let latestSha: string | undefined = undefined;
+    const check = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, {
+      headers,
+      cache: 'no-store',
+    });
+    if (check.ok) {
+      const d = await check.json();
+      latestSha = d.sha;
+      cloudSha = d.sha;
     }
 
     const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
@@ -269,7 +269,7 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
       body: JSON.stringify({
         message: 'db(sync): update tickets database in cloud',
         content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),
-        sha: cloudSha || undefined,
+        sha: latestSha || cloudSha || undefined,
         branch: 'main',
       }),
     });
@@ -277,6 +277,10 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<void> {
     if (res.ok) {
       const d = await res.json();
       cloudSha = d?.content?.sha || cloudSha;
+      console.log('Successfully saved tickets to GitHub Cloud database!');
+    } else {
+      const errText = await res.text();
+      console.error(`GitHub API PUT failed status ${res.status}:`, errText);
     }
   } catch (err) {
     console.error('Error saving tickets to GitHub:', err);
@@ -872,6 +876,72 @@ class TicketStore {
     }
 
     return newMessage;
+  }
+
+  async completeTicketProductionAsync(
+    ticketId: string,
+    workerResult: {
+      success: boolean;
+      solutionMessage: string;
+      error?: string;
+    }
+  ): Promise<Ticket | undefined> {
+    const ticket = this.completeTicketProduction(ticketId, workerResult);
+    if (ticket) {
+      await this.saveAsync();
+    }
+    return ticket;
+  }
+
+  async rejectTicketAsync(
+    ticketId: string,
+    rejectionReason: string,
+    agentName: string = 'HelpUS Master',
+    fallbackTicket?: Ticket
+  ): Promise<Ticket | undefined> {
+    const ticket = this.rejectTicket(ticketId, rejectionReason, agentName, fallbackTicket);
+    if (ticket) {
+      await this.saveAsync();
+    }
+    return ticket;
+  }
+
+  async editTicketAsync(
+    id: string,
+    updates: {
+      title?: string;
+      description?: string;
+      category?: Ticket['category'];
+      priority?: Ticket['priority'];
+    },
+    fallbackTicket?: Ticket
+  ): Promise<Ticket | undefined> {
+    const ticket = this.editTicket(id, updates, fallbackTicket);
+    if (ticket) {
+      await this.saveAsync();
+    }
+    return ticket;
+  }
+
+  async cancelTicketAsync(
+    id: string,
+    cancellationReason: string,
+    cancelledByName: string,
+    fallbackTicket?: Ticket
+  ): Promise<Ticket | undefined> {
+    const ticket = this.cancelTicket(id, cancellationReason, cancelledByName, fallbackTicket);
+    if (ticket) {
+      await this.saveAsync();
+    }
+    return ticket;
+  }
+
+  async updateTicketStatusAsync(id: string, status: Ticket['status'], assignedTo?: string): Promise<Ticket | undefined> {
+    const ticket = this.updateTicketStatus(id, status, assignedTo);
+    if (ticket) {
+      await this.saveAsync();
+    }
+    return ticket;
   }
 }
 

@@ -64,7 +64,7 @@ export async function PATCH(
     }
 
     if (body.action === 'complete' || body.action === 'resolve') {
-      const updated = ticketStore.completeTicketProduction(id, {
+      const updated = await ticketStore.completeTicketProductionAsync(id, {
         success: true,
         solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
       });
@@ -78,7 +78,7 @@ export async function PATCH(
       if (!body.rejectionReason) {
         return NextResponse.json({ success: false, error: 'Motivo da recusa é obrigatório' }, { status: 400 });
       }
-      const updated = ticketStore.rejectTicket(
+      const updated = await ticketStore.rejectTicketAsync(
         id,
         body.rejectionReason,
         body.agentName || 'HelpUS Master',
@@ -98,7 +98,7 @@ export async function PATCH(
           { status: 400 }
         );
       }
-      const updated = ticketStore.editTicket(
+      const updated = await ticketStore.editTicketAsync(
         id,
         {
           title: body.title,
@@ -125,7 +125,7 @@ export async function PATCH(
       if (!body.cancellationReason) {
         return NextResponse.json({ success: false, error: 'Motivo do cancelamento é obrigatório' }, { status: 400 });
       }
-      const updated = ticketStore.cancelTicket(
+      const updated = await ticketStore.cancelTicketAsync(
         id,
         body.cancellationReason,
         body.cancelledByName || 'Cliente',
@@ -138,7 +138,7 @@ export async function PATCH(
     }
 
     if (body.status) {
-      const updated = ticketStore.updateTicketStatus(id, body.status, body.assignedTo);
+      const updated = await ticketStore.updateTicketStatusAsync(id, body.status, body.assignedTo);
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
       }

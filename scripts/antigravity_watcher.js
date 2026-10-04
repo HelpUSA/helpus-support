@@ -35,17 +35,8 @@ async function getGitHubHeaders() {
 
 async function fetchTickets() {
   try {
-    const res = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, { cache: 'no-store' });
-    if (res.ok) {
-      return await res.json();
-    }
-  } catch (e) {
-    console.error('[WATCHDOG] Fetch raw error:', e.message);
-  }
-
-  try {
     const headers = await getGitHubHeaders();
-    const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, { headers, cache: 'no-store' });
+    const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       cloudSha = data.sha;
@@ -54,6 +45,15 @@ async function fetchTickets() {
     }
   } catch (e) {
     console.error('[WATCHDOG] Fetch API error:', e.message);
+  }
+
+  try {
+    const res = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, { cache: 'no-store' });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.error('[WATCHDOG] Fetch raw error:', e.message);
   }
   return [];
 }
@@ -72,12 +72,12 @@ async function saveTickets(tickets) {
       'Accept': 'application/vnd.github+json'
     };
 
-    if (!cloudSha) {
-      const check = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, { headers, cache: 'no-store' });
-      if (check.ok) {
-        const d = await check.json();
-        cloudSha = d.sha;
-      }
+    let latestSha = undefined;
+    const check = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
+    if (check.ok) {
+      const d = await check.json();
+      latestSha = d.sha;
+      cloudSha = d.sha;
     }
 
     const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
@@ -86,7 +86,7 @@ async function saveTickets(tickets) {
       body: JSON.stringify({
         message: 'db(watchdog): update tickets execution progress',
         content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),
-        sha: cloudSha || undefined,
+        sha: latestSha || cloudSha || undefined,
         branch: 'main'
       })
     });
@@ -95,6 +95,9 @@ async function saveTickets(tickets) {
       const d = await res.json();
       cloudSha = d?.content?.sha || cloudSha;
       console.log('[WATCHDOG] Saved tickets database to GitHub Cloud!');
+    } else {
+      const errText = await res.text();
+      console.error(`[WATCHDOG] GitHub API PUT failed status ${res.status}:`, errText);
     }
   } catch (e) {
     console.error('[WATCHDOG] Save error:', e.message);

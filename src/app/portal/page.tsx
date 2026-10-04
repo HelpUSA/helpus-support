@@ -987,19 +987,44 @@ export default function ClientPortalPage() {
                       </div>
                     </>
                   ) : selectedTicket.status === 'in_production' ? (
-                    <div className="p-3 bg-purple-950/60 border border-purple-500/40 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-purple-300 flex items-center gap-2">
+                    <div className="p-4 bg-purple-950/70 border border-purple-500/50 rounded-xl space-y-3 shadow-lg relative overflow-hidden">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-purple-200 flex items-center gap-2">
                           <Cpu className="w-4 h-4 text-purple-400 animate-spin" />
-                          ⚡ Chamado Aprovado — Produção Iniciada!
+                          ⚡ Execução Antigravity em Andamento
                         </span>
-                        <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded border border-purple-500/20">
-                          Deploy em Andamento
+                        <span className="text-xs font-extrabold text-indigo-300 font-mono bg-indigo-500/20 px-2.5 py-1 rounded-lg border border-indigo-500/30">
+                          {selectedTicket.progressPercentage || 25}% CONCLUÍDO
                         </span>
                       </div>
-                      <p className="text-[11px] text-slate-300 leading-relaxed">
-                        O robô autônomo está compilando o código e enviando a atualização para a nuvem Vercel. O status atualizará para <strong>Concluído</strong> assim que o deploy finalizar.
-                      </p>
+
+                      {/* Percentage Progress Bar */}
+                      <div className="space-y-1">
+                        <div className="w-full bg-slate-950 h-3.5 rounded-full overflow-hidden p-0.5 border border-purple-500/30 shadow-inner">
+                          <div
+                            className="bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 h-full rounded-full transition-all duration-500 ease-out shadow-[0_0_12px_rgba(168,85,247,0.6)]"
+                            style={{ width: `${selectedTicket.progressPercentage || 25}%` }}
+                          ></div>
+                        </div>
+                        <div className="flex justify-between text-[10px] text-slate-400 font-mono pt-0.5">
+                          <span>0% Inicial</span>
+                          <span>25% Análise</span>
+                          <span>50% Código</span>
+                          <span>75% Build</span>
+                          <span>100% Deploy</span>
+                        </div>
+                      </div>
+
+                      {/* Current Live Step Box */}
+                      <div className="p-3 bg-slate-950/80 border border-purple-500/30 rounded-xl space-y-1.5">
+                        <div className="flex items-center gap-2 text-[11px] font-bold text-purple-300">
+                          <Sparkles className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+                          <span>Fase Atual da Inteligência Artificial:</span>
+                        </div>
+                        <p className="text-xs text-slate-200 font-medium leading-relaxed">
+                          {selectedTicket.progressStep || '📥 Recebido pelo Antigravity! Analisando arquivos e requisitos da solicitação...'}
+                        </p>
+                      </div>
                     </div>
                   ) : selectedTicket.status === 'resolved' ? (
                     <div className="p-3 bg-emerald-950/60 border border-emerald-500/40 rounded-xl space-y-1">

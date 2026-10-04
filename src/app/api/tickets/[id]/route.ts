@@ -28,6 +28,18 @@ export async function PATCH(
     // Ensure tickets are fetched from GitHub database on serverless execution
     await ticketStore.getTicketsAsync();
 
+    if (body.action === 'progress') {
+      const updated = await ticketStore.updateTicketProgress(
+        id,
+        Number(body.percentage || 0),
+        body.stepMessage || 'Executando tarefa no Antigravity...'
+      );
+      if (!updated) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, data: updated });
+    }
+
     if (body.action === 'reset') {
       const updated = await ticketStore.resetTicket(id);
       if (!updated) {

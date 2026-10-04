@@ -611,6 +611,36 @@ class TicketStore {
     return ticket;
   }
 
+  async updateTicketProgress(
+    ticketId: string,
+    percentage: number,
+    stepMessage: string
+  ): Promise<Ticket | undefined> {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) return undefined;
+
+    ticket.progressPercentage = Math.min(100, Math.max(0, percentage));
+    ticket.progressStep = stepMessage;
+    ticket.updatedAt = new Date().toISOString();
+
+    const lastMsg = ticket.messages[ticket.messages.length - 1];
+    if (!lastMsg || !lastMsg.content.includes(stepMessage)) {
+      ticket.messages.push({
+        id: `msg-prg-${Date.now()}`,
+        ticketId: ticket.id,
+        senderId: 'ci.cd@helpusbr.com',
+        senderName: 'Antigravity Execution Pipeline',
+        senderRole: 'agent',
+        isInternalNote: false,
+        content: `⚡ *[PROGRESSO ${percentage}%]*: ${stepMessage}`,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    await this.saveAsync();
+    return ticket;
+  }
+
   async resetTicket(ticketId: string): Promise<Ticket | undefined> {
     let ticket = this.tickets.find((t) => t.id === ticketId || t.code === ticketId);
     if (!ticket) {

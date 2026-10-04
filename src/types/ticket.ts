@@ -63,4 +63,6 @@ export interface Ticket {
   slaDeadline?: string;
   cancellationReason?: string;
   adminNotes?: string;
+  progressPercentage?: number; // 0 to 100
+  progressStep?: string; // Current step description
 }

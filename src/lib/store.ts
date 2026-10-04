@@ -18,7 +18,8 @@ export const INITIAL_TICKETS: Ticket[] = [
     description: "Nos dois Campos que são data do exame e data da emissão assinatura do laudo ficará mais prático se ao clicar abrir um pequeno calendário, e que o campo de digitação já tenha uma máscara prévia com formato de data com as barras separando o dia mês e ano",
     category: "support",
     priority: "medium",
-    status: "pending_approval",
+    status: "resolved",
+    assignedTo: "HelpUS Master SuperAdmin",
     createdByEmail: "eduardojcmagalhaes@gmail.com",
     createdByName: "Eduardo Magalhães (Neuro)",
     contextData: {
@@ -39,10 +40,20 @@ export const INITIAL_TICKETS: Ticket[] = [
         content: "Nos dois Campos que são data do exame e data da emissão assinatura do laudo ficará mais prático se ao clicar abrir um pequeno calendário, e que o campo de digitação já tenha uma máscara prévia com formato de data com as barras separando o dia mês e ano",
         attachments: [],
         createdAt: "2026-10-03T23:01:51.000Z"
+      },
+      {
+        "id": "msg-res-1791048000003",
+        "ticketId": "tck-1791048000000",
+        "senderId": "ia.engine@helpusbr.com",
+        "senderName": "IA Autônoma (HelpUS Tech)",
+        "senderRole": "agent",
+        "isInternalNote": false,
+        "content": "✨ *[CONCLUÍDO & RESOLVIDO]*: Adicionado calendário interativo e máscara de data no formato DD/MM/AAAA para os campos 'Data do Exame' e 'Emissão / Assinatura do Laudo' na aplicação de Laudos Médicos (neuro.eduardomagalhaes).",
+        "createdAt": "2026-10-04T01:15:00.000Z"
       }
     ],
     createdAt: "2026-10-03T23:01:51.000Z",
-    updatedAt: "2026-10-03T23:01:51.000Z"
+    updatedAt: "2026-10-04T06:00:00.000Z"
   },
   {
     id: "tck-1791041805230",

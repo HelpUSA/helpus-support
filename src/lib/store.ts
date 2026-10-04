@@ -366,10 +366,7 @@ class TicketStore {
           const memoryMap = new Map(this.tickets.map((t) => [t.id, t]));
           cloudTickets.forEach((ct) => {
             if (!ct.status) ct.status = 'pending_approval';
-            const existing = memoryMap.get(ct.id);
-            if (!existing || new Date(ct.updatedAt || ct.createdAt).getTime() >= new Date(existing.updatedAt || existing.createdAt).getTime()) {
-              memoryMap.set(ct.id, ct);
-            }
+            memoryMap.set(ct.id, ct);
           });
           this.tickets = Array.from(memoryMap.values()).sort(
             (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()

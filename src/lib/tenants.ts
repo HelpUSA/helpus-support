@@ -6,7 +6,7 @@ export const INITIAL_TENANTS: Tenant[] = [
   { id: 'ariticumchales', name: 'Ariticum Chalés', slug: 'ariticumchales', domain: 'ariticumchales.com.br', primaryColor: '#059669', apiKey: 'ari_live_003', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'barbearia', name: 'Barbearia App', slug: 'barbearia', domain: 'barbearia.helpusbr.com', primaryColor: '#d97706', apiKey: 'bar_live_004', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'bluebox', name: 'Bluebox Informática', slug: 'bluebox', domain: 'bluebox.helpusbr.com', primaryColor: '#0284c7', apiKey: 'blu_live_005', createdAt: '2026-09-01T10:00:00Z' },
-  { id: 'brayyan', name: 'Brayyan Moda Infantil', slug: 'brayyan', domain: 'brayyan.helpusbr.com', primaryColor: '#f43f5e', apiKey: 'bry_live_80495867h', createdAt: '2026-09-18T09:00:00Z' },
+  { id: 'brayyan', name: 'Brayyan — Revisão Sistemática com IA', slug: 'brayyan', domain: 'brayyan.helpusbr.com', primaryColor: '#6366f1', apiKey: 'bry_live_80495867h', createdAt: '2026-09-18T09:00:00Z' },
   { id: 'caipiraraiz', name: 'Caipira Raiz Ovos', slug: 'caipiraraiz', domain: 'caipira.helpusbr.com', primaryColor: '#ea580c', apiKey: 'cpr_live_90596877i', createdAt: '2026-09-19T13:00:00Z' },
   { id: 'capinarpb', name: 'Capinar PB', slug: 'capinarpb', domain: 'capinar.helpusbr.com', primaryColor: '#16a34a', apiKey: 'cap_live_006', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'cardioia', name: 'CardioIA', slug: 'cardioia', domain: 'cardioia.helpusbr.com', primaryColor: '#dc2626', apiKey: 'car_live_007', createdAt: '2026-09-01T10:00:00Z' },

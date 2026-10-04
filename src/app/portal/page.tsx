@@ -941,12 +941,14 @@ export default function ClientPortalPage() {
                     </>
                   )}
 
-                  <button
-                    onClick={() => generateTicketPDFReport(selectedTicket)}
-                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                  >
-                    <Printer className="w-4 h-4" /> Baixar PDF
-                  </button>
+                  {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (
+                    <button
+                      onClick={() => generateTicketPDFReport(selectedTicket)}
+                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                    >
+                      <Printer className="w-4 h-4" /> Baixar PDF (Laudo Técnico)
+                    </button>
+                  )}
                   {getStatusBadge(selectedTicket.status)}
                 </div>
               </div>

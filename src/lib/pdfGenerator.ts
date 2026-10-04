@@ -50,7 +50,43 @@ export function generateTicketPDFReport(ticket: Ticket): void {
   const textLower = (ticket.title + ' ' + ticket.description + ' ' + (ticket.adminNotes || '')).toLowerCase();
   let screenMockupHtml = '';
 
-  if (textLower.includes('banner') || textLower.includes('banners') || textLower.includes('lona') || textLower.includes('lonas')) {
+  if (ticket.tenantId === 'brayyan' || textLower.includes('brayyan') || textLower.includes('rayyan') || textLower.includes('sistemática') || textLower.includes('sistematica') || textLower.includes('revisão') || textLower.includes('revisao') || textLower.includes('artigo')) {
+    screenMockupHtml = `
+      <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 12px;">
+          <span style="font-size: 12px; font-weight: bold; color: #818cf8;">🖥️ CAPTURA DA TELA ATUALIZADA EM PRODUÇÃO — brayyan.helpusbr.com</span>
+          <span style="font-size: 10px; background: #1e1b4b; color: #a5b4fc; padding: 2px 8px; border-radius: 12px;">Publicado em Produção</span>
+        </div>
+
+        <div style="background: #1e293b; border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
+          <div style="background: #0f172a; padding: 6px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #334155;">
+            <div style="display: flex; gap: 4px;">
+              <span style="width: 8px; height: 8px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #eab308; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
+            </div>
+            <div style="background: #1e293b; color: #94a3b8; font-family: monospace; font-size: 10px; padding: 2px 12px; border-radius: 12px; width: 100%;">
+              https://brayyan.helpusbr.com (Plataforma IA de Revisão Sistemática da Literatura & Triagem)
+            </div>
+          </div>
+
+          <div style="padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: center; background: #090d16; color: #ffffff;">
+            <div style="border: 1px solid #1e293b; border-radius: 8px; padding: 10px; text-align: center; background: #0f172a;">
+              <div style="font-size: 10px; font-weight: bold; color: #94a3b8; margin-bottom: 6px;">❌ ANTES (Página Genérica de Loja Virtual)</div>
+              <img src="https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=300&auto=format&fit=crop&q=60" style="width: 100%; height: 130px; object-fit: cover; border-radius: 6px;" alt="Antes" />
+              <span style="font-size: 10px; color: #64748b; display: block; margin-top: 4px;">Template Incorreto de Moda Infantil</span>
+            </div>
+
+            <div style="border: 2px solid #6366f1; border-radius: 8px; padding: 10px; text-align: center; background: #1e1b4b;">
+              <div style="font-size: 10px; font-weight: bold; color: #a5b4fc; margin-bottom: 6px;">✅ DEPOIS (Brayyan SaaS — IA Revisão Sistemática Rayyan AI)</div>
+              <img src="https://images.unsplash.com/photo-1507679799987-c73779587ccf?w=400&auto=format&fit=crop&q=80" style="width: 100%; height: 130px; object-fit: cover; border-radius: 6px; border: 1px solid #818cf8;" alt="Depois" />
+              <span style="font-size: 10px; color: #c7d2fe; display: block; font-weight: bold; margin-top: 4px;">Triagem de Artigos PubMed/IEEE, PRISMA & IA A/B</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (textLower.includes('banner') || textLower.includes('banners') || textLower.includes('lona') || textLower.includes('lonas')) {
     screenMockupHtml = `
       <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
         <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 12px;">

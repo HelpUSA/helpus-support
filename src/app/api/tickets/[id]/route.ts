@@ -49,7 +49,7 @@ export async function PATCH(
     }
 
     if (body.action === 'approve') {
-      const updated = ticketStore.startTicketProduction(
+      const updated = await ticketStore.startTicketProductionAsync(
         id,
         body.agentName || 'HelpUS Master',
         body.adminNotes,

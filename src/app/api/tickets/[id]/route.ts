@@ -135,7 +135,7 @@ export async function PATCH(
 
     return NextResponse.json({ success: false, error: 'Ação não especificada ou inválida' }, { status: 400 });
   } catch (error: any) {
-    return NextResponse.json({ success: false, error: error.stack || error.message }, { status: 500 });
+    return NextResponse.json({ success: false, error: String(error?.stack || error?.message || error) }, { status: 500 });
   }
 }
 

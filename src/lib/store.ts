@@ -532,6 +532,8 @@ class TicketStore {
 
     // 2. Production step: ENTROU EM PRODUÇÃO (status = in_production)
     ticket.status = 'in_production';
+    ticket.progressPercentage = 0;
+    ticket.progressStep = '⚡ Entrada em Produção autorizada. Robô autônomo aguardando execução...';
     ticket.messages.push({
       id: `msg-prod-${Date.now() + 1}`,
       ticketId: ticket.id,

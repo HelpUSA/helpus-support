@@ -59,7 +59,7 @@ async function fetchTickets() {
 }
 
 async function saveTickets(tickets) {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+  const token = GITHUB_TOKEN;
   if (!token) {
     console.warn('[WATCHDOG] GITHUB_TOKEN not set, saving skipped');
     return;
@@ -188,7 +188,7 @@ async function processTicket(ticket, allTickets) {
 async function runWatchdog() {
   console.log(`[WATCHDOG ${new Date().toLocaleTimeString('pt-BR')}] Verificando banco de dados no GitHub Cloud...`);
   const tickets = await fetchTickets();
-  const pendingProduction = tickets.filter((t) => t.status === 'in_production');
+  const pendingProduction = tickets.filter((t) => t.status === 'in_production' && t.progressPercentage !== 100);
 
   if (pendingProduction.length === 0) {
     console.log('[WATCHDOG] NENHUM chamado aguardando execução em produção no momento.');

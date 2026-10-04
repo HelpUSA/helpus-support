@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   const tenantId = searchParams.get('tenantId') || undefined;
   
   const tickets = await ticketStore.getTicketsAsync(tenantId);
-  return NextResponse.json({ success: true, count: tickets.length, data: tickets });
+  return NextResponse.json({ success: true, version: 'v_2026_10_04_v2', count: tickets.length, data: tickets });
 }
 
 export async function POST(request: NextRequest) {

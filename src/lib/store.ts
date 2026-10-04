@@ -337,7 +337,6 @@ class TicketStore {
       } catch (e) {
         console.error('Server storage save error', e);
       }
-      saveGitHubTickets(this.tickets).catch((err) => console.error('Cloud save failed', err));
     }
   }
 

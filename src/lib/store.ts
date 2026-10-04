@@ -341,7 +341,11 @@ class TicketStore {
       } catch (e) {
         console.error('Server storage save error', e);
       }
-      await saveGitHubTickets(this.tickets);
+      try {
+        await saveGitHubTickets(this.tickets);
+      } catch (err) {
+        console.error('Cloud save failed in saveAsync', err);
+      }
     }
   }
 
@@ -605,12 +609,30 @@ class TicketStore {
   }
 
   async resetTicket(ticketId: string): Promise<Ticket | undefined> {
-    const ticket = this.getTicketById(ticketId);
+    let ticket = this.tickets.find((t) => t.id === ticketId || t.code === ticketId);
+    if (!ticket) {
+      ticket = INITIAL_TICKETS.find((t) => t.id === ticketId || t.code === ticketId);
+      if (ticket) {
+        this.tickets.unshift(ticket);
+      }
+    }
     if (!ticket) return undefined;
 
     ticket.status = 'pending_approval';
     ticket.updatedAt = new Date().toISOString();
-    ticket.messages = ticket.messages.slice(0, 1);
+    ticket.messages = [
+      {
+        id: "msg-1791048000000",
+        ticketId: ticket.id,
+        senderId: ticket.createdByEmail || "eduardojcmagalhaes@gmail.com",
+        senderName: ticket.createdByName || "Eduardo Magalhães (Neuro)",
+        senderRole: "client",
+        isInternalNote: false,
+        content: ticket.description,
+        attachments: [],
+        createdAt: ticket.createdAt || "2026-10-03T23:01:51.000Z"
+      }
+    ];
     await this.saveAsync();
     return ticket;
   }

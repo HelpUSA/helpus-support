@@ -426,7 +426,7 @@ class TicketStore {
     const baseNum = (data as any).clientTicketCount ? (data as any).clientTicketCount + 100 : 100;
     const maxNum = existingNums.length > 0 ? Math.max(...existingNums, baseNum) : baseNum;
     const nextNum = maxNum + 1;
-    const prefix = tenant.id.slice(0, 3).toUpperCase();
+    const prefix = (tenant?.id || data.tenantId || 'HLP').slice(0, 3).toUpperCase();
     const code = `${prefix}-${nextNum}`;
 
     const newTicket: Ticket = {

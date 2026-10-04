@@ -28,6 +28,14 @@ export async function PATCH(
     // Ensure tickets are fetched from GitHub database on serverless execution
     await ticketStore.getTicketsAsync();
 
+    if (body.action === 'reset') {
+      const updated = ticketStore.resetTicket(id);
+      if (!updated) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+      }
+      return NextResponse.json({ success: true, data: updated });
+    }
+
     if (body.action === 'approve') {
       const updated = ticketStore.startTicketProduction(
         id,

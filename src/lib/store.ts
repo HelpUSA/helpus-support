@@ -604,6 +604,17 @@ class TicketStore {
     return ticket;
   }
 
+  resetTicket(ticketId: string): Ticket | undefined {
+    const ticket = this.getTicketById(ticketId);
+    if (!ticket) return undefined;
+
+    ticket.status = 'pending_approval';
+    ticket.updatedAt = new Date().toISOString();
+    ticket.messages = ticket.messages.slice(0, 1);
+    this.save();
+    return ticket;
+  }
+
   // Alias for backward compatibility
   async approveAndExecuteTicket(
     ticketId: string,

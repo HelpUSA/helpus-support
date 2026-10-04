@@ -7,3 +7,8 @@ pending_ticket_trigger.json
 open_window_titles.txt
 
 .vercel
+
+# Segredos e Variáveis de Ambiente
+.env
+.env.local
+.env*.local

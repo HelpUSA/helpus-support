@@ -8,7 +8,181 @@ import { getAutoResolutionDetails } from '@/lib/aiResolver';
 import { aiAutoCodingWorker } from '@/lib/aiWorker';
 export { INITIAL_TENANTS };
 
-export const INITIAL_TICKETS: Ticket[] = [];
+export const INITIAL_TICKETS: Ticket[] = [
+  {
+    id: "tck-1791048000000",
+    tenantId: "neuro.eduardomagalhaes",
+    tenantName: "Dr. Eduardo Magalhães Neurologista (Neuro)",
+    code: "NEU-107",
+    title: "Calendário e máscara de data nos campos de exame e emissão",
+    description: "Nos dois Campos que são data do exame e data da emissão assinatura do laudo ficará mais prático se ao clicar abrir um pequeno calendário, e que o campo de digitação já tenha uma máscara prévia com formato de data com as barras separando o dia mês e ano",
+    category: "support",
+    priority: "medium",
+    status: "pending_approval",
+    createdByEmail: "eduardojcmagalhaes@gmail.com",
+    createdByName: "Eduardo Magalhães (Neuro)",
+    contextData: {
+      url: "https://neuro.eduardomagalhaes.helpusbr.com",
+      userEmail: "eduardojcmagalhaes@gmail.com",
+      userName: "Eduardo Magalhães (Neuro)",
+      os: "Windows 11 (Chrome 128)"
+    },
+    attachments: [],
+    messages: [
+      {
+        id: "msg-1791048000000",
+        ticketId: "tck-1791048000000",
+        senderId: "eduardojcmagalhaes@gmail.com",
+        senderName: "Eduardo Magalhães (Neuro)",
+        senderRole: "client",
+        isInternalNote: false,
+        content: "Nos dois Campos que são data do exame e data da emissão assinatura do laudo ficará mais prático se ao clicar abrir um pequeno calendário, e que o campo de digitação já tenha uma máscara prévia com formato de data com as barras separando o dia mês e ano",
+        attachments: [],
+        createdAt: "2026-10-03T23:01:51.000Z"
+      }
+    ],
+    createdAt: "2026-10-03T23:01:51.000Z",
+    updatedAt: "2026-10-03T23:01:51.000Z"
+  },
+  {
+    id: "tck-1791041805230",
+    tenantId: "publicarte",
+    tenantName: "Public Arte",
+    code: "PUB-106",
+    title: "atualização de produtos e categorias",
+    description: "analise esses tres pdfs com imagens de publicações da publicarte. pegue as categorias, as imagens, etc e monte a base de dados de produtos reais que a publicarte tem.",
+    category: "support",
+    priority: "medium",
+    status: "resolved",
+    createdByEmail: "helpus.ecommerce@gmail.com",
+    createdByName: "HelpUS Master SuperAdmin",
+    contextData: {
+      url: "https://publicarte.helpusbr.com",
+      userEmail: "helpus.ecommerce@gmail.com",
+      userName: "HelpUS Master SuperAdmin",
+      os: "Windows 11 (Chrome 128)"
+    },
+    attachments: [],
+    messages: [
+      {
+        id: "msg-1791041805230",
+        ticketId: "tck-1791041805230",
+        senderId: "helpus.ecommerce@gmail.com",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "client",
+        isInternalNote: false,
+        content: "analise esses tres pdfs com imagens de publicações da publicarte. pegue as categorias, as imagens, etc e monte a base de dados de produtos reais que a publicarte tem.",
+        attachments: [],
+        createdAt: "2026-10-03T12:36:45.523Z"
+      },
+      {
+        id: "msg-res-1791041805230",
+        ticketId: "tck-1791041805230",
+        senderId: "helpus.ecommerce@gmail.com",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "✨ *[CONCLUÍDO & RESOLVIDO]*: A base de dados de produtos da Public Arte foi atualizada com sucesso a partir da análise detalhada das publicações dos 3 catálogos PDF. Foram catalogados 21 produtos reais completos organizados por categorias.",
+        createdAt: "2026-10-03T17:10:00.000Z"
+      }
+    ],
+    createdAt: "2026-10-03T12:36:45.523Z",
+    updatedAt: "2026-10-03T17:10:00.000Z",
+    assignedTo: "HelpUS Master SuperAdmin"
+  },
+  {
+    id: "tck-1791038803000",
+    tenantId: "neuro.eduardomagalhaes",
+    tenantName: "Dr. Eduardo Magalhães Neurologista (Neuro)",
+    code: "NEU-105",
+    title: "Datas de exame",
+    description: "Na tela de edição de laudos dos exames a data do exame está atualizando automaticamente enquanto a data da emissão assinatura do laudo permanece igual. Tem que ser o contrário",
+    category: "support",
+    priority: "medium",
+    status: "resolved",
+    createdByEmail: "eduardojcmagalhaes@gmail.com",
+    createdByName: "Eduardo Magalhães (Neuro)",
+    contextData: {
+      url: "https://neuro.eduardomagalhaes.helpusbr.com",
+      userEmail: "eduardojcmagalhaes@gmail.com",
+      userName: "Eduardo Magalhães (Neuro)",
+      os: "Windows 11 (Chrome 128)"
+    },
+    attachments: [],
+    messages: [
+      {
+        id: "msg-1791038803000",
+        ticketId: "tck-1791038803000",
+        senderId: "eduardojcmagalhaes@gmail.com",
+        senderName: "Eduardo Magalhães (Neuro)",
+        senderRole: "client",
+        isInternalNote: false,
+        content: "Na tela de edição de laudos dos exames a data do exame está atualizando automaticamente enquanto a data da emissão assinatura do laudo permanece igual. Tem que ser o contrário",
+        attachments: [],
+        createdAt: "2026-10-03T09:06:43.000Z"
+      },
+      {
+        id: "msg-res-1791038803000",
+        ticketId: "tck-1791038803000",
+        senderId: "helpus.ecommerce@gmail.com",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "✨ *[CONCLUÍDO & RESOLVIDO]*: A data de Emissão/Assinatura do Laudo agora é atualizada dinamicamente para o dia de hoje (data atual), enquanto a Data do Exame permanece preservada do registro do exame.",
+        createdAt: "2026-10-03T12:05:00.000Z"
+      }
+    ],
+    createdAt: "2026-10-03T09:06:43.000Z",
+    updatedAt: "2026-10-03T12:05:00.000Z",
+    assignedTo: "HelpUS Master SuperAdmin"
+  },
+  {
+    id: "tck-1790973331000",
+    tenantId: "neuro.eduardomagalhaes",
+    tenantName: "Dr. Eduardo Magalhães Neurologista (Neuro)",
+    code: "NEU-104",
+    title: "Árvore de modelos fechada por padrão",
+    description: "Na tela de edição de laudos a árvore de modelos deverá ficar fechada por padrão ao carregarmos a página, de modo a podermos ver rapidamente qual ramificação da árvore precisamos",
+    category: "support",
+    priority: "medium",
+    status: "resolved",
+    createdByEmail: "eduardojcmagalhaes@gmail.com",
+    createdByName: "Eduardo Magalhães (Neuro)",
+    contextData: {
+      url: "https://neuro.eduardomagalhaes.helpusbr.com",
+      userEmail: "eduardojcmagalhaes@gmail.com",
+      userName: "Eduardo Magalhães (Neuro)",
+      os: "Windows 11 (Chrome 128)"
+    },
+    attachments: [],
+    messages: [
+      {
+        id: "msg-1790973331000",
+        ticketId: "tck-1790973331000",
+        senderId: "eduardojcmagalhaes@gmail.com",
+        senderName: "Eduardo Magalhães (Neuro)",
+        senderRole: "client",
+        isInternalNote: false,
+        content: "Na tela de edição de laudos a árvore de modelos deverá ficar fechada por padrão ao carregarmos a página, de modo a podermos ver rapidamente qual ramificação da árvore precisamos",
+        attachments: [],
+        createdAt: "2026-10-02T17:35:31.000Z"
+      },
+      {
+        id: "msg-res-1790973345000",
+        ticketId: "tck-1790973331000",
+        senderId: "helpus.ecommerce@gmail.com",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "✨ *[CONCLUÍDO & RESOLVIDO]*: A árvore de modelos de laudos agora inicia 100% FECHADA/COLAPSADA por padrão ao carregar a página.",
+        createdAt: "2026-10-02T17:41:00.000Z"
+      }
+    ],
+    createdAt: "2026-10-02T17:35:31.000Z",
+    updatedAt: "2026-10-02T17:41:00.000Z",
+    assignedTo: "HelpUS Master SuperAdmin"
+  }
+];
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
 const DB_REPO = 'HelpUSA/publicarte';
@@ -157,6 +331,20 @@ class TicketStore {
     }
   }
 
+  async saveAsync(): Promise<void> {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('helpus_tickets_v1', JSON.stringify(this.tickets));
+    } else {
+      try {
+        const filePath = this.getStoragePath();
+        fs.writeFileSync(filePath, JSON.stringify(this.tickets, null, 2), 'utf-8');
+      } catch (e) {
+        console.error('Server storage save error', e);
+      }
+      await saveGitHubTickets(this.tickets);
+    }
+  }
+
   getTenants(): Tenant[] {
     return this.tenants;
   }
@@ -176,8 +364,17 @@ class TicketStore {
     if (typeof window === 'undefined') {
       try {
         const cloudTickets = await fetchGitHubTickets();
-        if (Array.isArray(cloudTickets)) {
-          this.tickets = cloudTickets;
+        if (Array.isArray(cloudTickets) && cloudTickets.length > 0) {
+          const memoryMap = new Map(this.tickets.map((t) => [t.id, t]));
+          cloudTickets.forEach((ct) => {
+            const existing = memoryMap.get(ct.id);
+            if (!existing || new Date(ct.updatedAt || ct.createdAt).getTime() >= new Date(existing.updatedAt || existing.createdAt).getTime()) {
+              memoryMap.set(ct.id, ct);
+            }
+          });
+          this.tickets = Array.from(memoryMap.values()).sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
           try {
             const filePath = this.getStoragePath();
             fs.writeFileSync(filePath, JSON.stringify(this.tickets, null, 2), 'utf-8');
@@ -265,6 +462,23 @@ class TicketStore {
     // Trigger WhatsApp & Email Alerts for Approval
     notificationService.notifyTicketCreated(newTicket);
 
+    return newTicket;
+  }
+
+  async createTicketAsync(data: {
+    tenantId: string;
+    title: string;
+    description: string;
+    category: Ticket['category'];
+    priority: Ticket['priority'];
+    createdByEmail: string;
+    createdByName: string;
+    contextData?: Ticket['contextData'];
+    attachments?: Attachment[];
+    clientTicketCount?: number;
+  }): Promise<Ticket> {
+    const newTicket = this.createTicket(data);
+    await this.saveAsync();
     return newTicket;
   }
 

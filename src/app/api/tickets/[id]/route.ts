@@ -25,6 +25,9 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
+    // Ensure tickets are fetched from GitHub database on serverless execution
+    await ticketStore.getTicketsAsync();
+
     if (body.action === 'approve') {
       const updated = ticketStore.startTicketProduction(
         id,
@@ -37,6 +40,17 @@ export async function PATCH(
       }
 
       // Ticket enters production status ('in_production') for local Antigravity Watcher execution
+      return NextResponse.json({ success: true, data: updated });
+    }
+
+    if (body.action === 'complete' || body.action === 'resolve') {
+      const updated = ticketStore.completeTicketProduction(id, {
+        success: true,
+        solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
+      });
+      if (!updated) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+      }
       return NextResponse.json({ success: true, data: updated });
     }
 

@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const newTicket = ticketStore.createTicket({
+    const newTicket = await ticketStore.createTicketAsync({
       tenantId,
       title: body.title,
       description: body.description,

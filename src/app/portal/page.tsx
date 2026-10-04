@@ -38,6 +38,7 @@ import { generateTicketPDFReport } from '@/lib/pdfGenerator';
 import CookieConsent from '@/components/CookieConsent';
 import PrivacyPolicyModal from '@/components/PrivacyPolicyModal';
 import UserManagementModal from '@/components/UserManagementModal';
+import SearchableTenantSelect from '@/components/SearchableTenantSelect';
 import { Users } from 'lucide-react';
 
 export default function ClientPortalPage() {
@@ -594,24 +595,14 @@ export default function ClientPortalPage() {
           )}
 
           {isMasterUser && (
-            <div className="flex items-center gap-1.5 bg-slate-950 px-2.5 py-1.5 rounded-xl border border-purple-500/30 shrink-0">
-              <Globe className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-              <span className="text-slate-400 font-medium hidden sm:inline">Empresa:</span>
-              <select
-                value={tenantFilter}
-                onChange={(e) => handleTenantFilterChange(e.target.value)}
-                className="bg-transparent text-xs text-purple-200 font-bold focus:outline-none cursor-pointer max-w-[130px] sm:max-w-[200px] truncate"
-              >
-                {isSuperAdmin && (
-                  <option value="all" className="bg-slate-900 text-slate-200">🌐 Todas as Empresas ({INITIAL_TENANTS.length})</option>
-                )}
-                {availableTenants.map((t) => (
-                  <option key={t.id} value={t.id} className="bg-slate-900 text-slate-200">
-                    🏢 {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <SearchableTenantSelect
+              tenants={availableTenants}
+              value={tenantFilter}
+              onChange={(val) => handleTenantFilterChange(val)}
+              includeAllOption={isSuperAdmin}
+              allOptionLabel="🌐 Todas as Empresas"
+              placeholder="🔍 Buscar empresa (ex: plural)..."
+            />
           )}
 
           <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-800 rounded-xl shrink-0">
@@ -789,17 +780,12 @@ export default function ClientPortalPage() {
                       <span className="flex items-center gap-1.5"><Building2 className="w-4 h-4 text-indigo-400" /> Empresa / Aplicação do Cliente Alvo</span>
                       <span className="text-[10px] text-slate-400 font-normal">SuperAdmin: Escolha a aplicação do cliente</span>
                     </label>
-                    <select
+                    <SearchableTenantSelect
+                      tenants={INITIAL_TENANTS}
                       value={targetTenantId}
-                      onChange={(e) => setTargetTenantId(e.target.value)}
-                      className="w-full bg-slate-950 border border-indigo-500/50 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:border-indigo-400 font-bold text-xs cursor-pointer shadow-inner"
-                    >
-                      {INITIAL_TENANTS.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          🏢 {t.name} ({t.domain})
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(val) => setTargetTenantId(val)}
+                      placeholder="🔍 Buscar empresa..."
+                    />
                   </div>
                 )}
 

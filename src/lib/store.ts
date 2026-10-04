@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import https from 'https';
 import { Ticket, Tenant, Message, Attachment } from '@/types/ticket';
 import { INITIAL_TENANTS } from '@/lib/tenants';
 import { notificationService } from '@/lib/notifications';
@@ -202,24 +203,49 @@ const DB_PATH = 'data/helpus_tickets.json';
 
 let cloudSha: string | null = null;
 
+function githubApiRequest(method: string, path: string, body?: any): Promise<{ status: number; data: any; raw: string }> {
+  return new Promise((resolve) => {
+    const token = (GITHUB_TOKEN || '').trim();
+    const payload = body ? JSON.stringify(body) : undefined;
+    const req = https.request(
+      {
+        hostname: 'api.github.com',
+        path,
+        method,
+        headers: {
+          'User-Agent': 'HelpUS-Support-Hub',
+          Accept: 'application/vnd.github+json',
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          ...(payload ? { 'Content-Length': Buffer.byteLength(payload) } : {}),
+        },
+      },
+      (res) => {
+        let responseText = '';
+        res.on('data', (chunk) => (responseText += chunk));
+        res.on('end', () => {
+          try {
+            const data = JSON.parse(responseText);
+            resolve({ status: res.statusCode || 500, data, raw: responseText });
+          } catch {
+            resolve({ status: res.statusCode || 500, data: null, raw: responseText });
+          }
+        });
+      }
+    );
+
+    req.on('error', (err) => resolve({ status: 500, data: null, raw: String(err) }));
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
 async function fetchGitHubTickets(): Promise<Ticket[]> {
   try {
-    const headers: Record<string, string> = {
-      'User-Agent': 'HelpUS-Support-Hub',
-      Accept: 'application/vnd.github+json',
-    };
-    if (GITHUB_TOKEN && GITHUB_TOKEN.trim()) {
-      headers.Authorization = `Bearer ${GITHUB_TOKEN.trim()}`;
-    }
-
-    const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, {
-      headers,
-      cache: 'no-store',
-    });
-    if (res.ok) {
-      const data = await res.json();
-      cloudSha = data.sha;
-      const content = Buffer.from(data.content, 'base64').toString('utf-8');
+    const res = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
+    if (res.status === 200 && res.data && res.data.content) {
+      cloudSha = res.data.sha;
+      const content = Buffer.from(res.data.content, 'base64').toString('utf-8');
       const tickets: Ticket[] = JSON.parse(content);
       return tickets;
     }
@@ -247,48 +273,29 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<{ success: boolean;
   }
 
   try {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${GITHUB_TOKEN.trim()}`,
-      'User-Agent': 'HelpUS-Support-Hub',
-      'Content-Type': 'application/json',
-      Accept: 'application/vnd.github+json',
-    };
-
+    const check = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
     let latestSha: string | undefined = undefined;
-    const check = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, {
-      headers,
-      cache: 'no-store',
-    });
-    if (check.ok) {
-      const d = await check.json();
-      latestSha = d.sha;
-      cloudSha = d.sha;
+    if (check.status === 200 && check.data && check.data.sha) {
+      latestSha = check.data.sha;
+      cloudSha = check.data.sha;
     } else {
-      const checkErr = await check.text();
-      console.error('Check SHA failed:', check.status, checkErr);
-      return { success: false, error: `Check SHA failed (${check.status}): ${checkErr}` };
+      return { success: false, error: `Check SHA failed (${check.status}): ${check.raw}` };
     }
 
-    const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({
-        message: 'db(sync): update tickets database in cloud',
-        content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),
-        sha: latestSha || cloudSha || undefined,
-        branch: 'main',
-      }),
+    const putRes = await githubApiRequest('PUT', `/repos/${DB_REPO}/contents/${DB_PATH}`, {
+      message: 'db(sync): update tickets database in cloud',
+      content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),
+      sha: latestSha || cloudSha || undefined,
+      branch: 'main',
     });
 
-    if (res.ok) {
-      const d = await res.json();
-      cloudSha = d?.content?.sha || cloudSha;
+    if (putRes.status === 200 || putRes.status === 201) {
+      cloudSha = putRes.data?.content?.sha || cloudSha;
       console.log('Successfully saved tickets to GitHub Cloud database!');
       return { success: true };
     } else {
-      const errText = await res.text();
-      console.error(`GitHub API PUT failed status ${res.status}:`, errText);
-      return { success: false, error: `GitHub PUT failed (${res.status}): ${errText}` };
+      console.error(`GitHub API PUT failed status ${putRes.status}:`, putRes.raw);
+      return { success: false, error: `GitHub PUT failed (${putRes.status}): ${putRes.raw}` };
     }
   } catch (err: any) {
     console.error('Error saving tickets to GitHub:', err);

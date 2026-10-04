@@ -29,7 +29,7 @@ export async function PATCH(
     await ticketStore.getTicketsAsync();
 
     if (body.action === 'reset') {
-      const updated = ticketStore.resetTicket(id);
+      const updated = await ticketStore.resetTicket(id);
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
       }

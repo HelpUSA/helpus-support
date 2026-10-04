@@ -604,14 +604,14 @@ class TicketStore {
     return ticket;
   }
 
-  resetTicket(ticketId: string): Ticket | undefined {
+  async resetTicket(ticketId: string): Promise<Ticket | undefined> {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) return undefined;
 
     ticket.status = 'pending_approval';
     ticket.updatedAt = new Date().toISOString();
     ticket.messages = ticket.messages.slice(0, 1);
-    this.save();
+    await this.saveAsync();
     return ticket;
   }
 

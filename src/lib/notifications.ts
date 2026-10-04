@@ -53,8 +53,8 @@ Uma nova solicitação foi aberta e aguarda aprovação no painel master:
 - Código do Chamado: ${ticket.code}
 - Cliente (Empresa): ${ticket.tenantName}
 - Solicitante: ${ticket.createdByName} <${ticket.createdByEmail}>
-- Categoria: ${ticket.category.toUpperCase()}
-- Prioridade: ${ticket.priority.toUpperCase()}
+- Categoria: ${(ticket.category || 'support').toUpperCase()}
+- Prioridade: ${(ticket.priority || 'medium').toUpperCase()}
 - Data/Hora: ${new Date(ticket.createdAt).toLocaleString('pt-BR')}
 
 DESCRIÇÃO DA SOLICITAÇÃO:

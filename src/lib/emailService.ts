@@ -56,7 +56,7 @@ class EmailNotificationService {
           <p style="margin: 6px 0;"><strong>🎫 Código:</strong> <span style="color: #818cf8; font-family: monospace; font-weight: bold;">${ticket.code}</span></p>
           <p style="margin: 6px 0;"><strong>🏢 Cliente (Empresa):</strong> ${ticket.tenantName}</p>
           <p style="margin: 6px 0;"><strong>👤 Solicitante:</strong> ${ticket.createdByName} (&lt;${ticket.createdByEmail}&gt;)</p>
-          <p style="margin: 6px 0;"><strong>⚠️ Prioridade:</strong> ${ticket.priority.toUpperCase()}</p>
+          <p style="margin: 6px 0;"><strong>⚠️ Prioridade:</strong> ${(ticket.priority || 'medium').toUpperCase()}</p>
           <p style="margin: 6px 0;"><strong>📅 Data/Hora:</strong> ${new Date(ticket.createdAt).toLocaleString('pt-BR')}</p>
         </div>
 
@@ -78,7 +78,7 @@ class EmailNotificationService {
 
   async sendTicketStatusUpdateEmail(ticket: Ticket, statusText: string): Promise<EmailLog> {
     const recipients = [EMAIL_CONFIG.masterTarget, ticket.createdByEmail].filter(Boolean).join(', ');
-    const subject = `[HelpUS Support] 🟢 Chamado ${ticket.code} Atualizado — Status: ${ticket.status.toUpperCase()}`;
+    const subject = `[HelpUS Support] 🟢 Chamado ${ticket.code} Atualizado — Status: ${(ticket.status || 'pending_approval').toUpperCase()}`;
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; border-radius: 16px;">
@@ -91,7 +91,7 @@ class EmailNotificationService {
           <p style="margin: 6px 0;"><strong>🎫 Código:</strong> <span style="color: #34d399; font-family: monospace; font-weight: bold;">${ticket.code}</span></p>
           <p style="margin: 6px 0;"><strong>🏢 Cliente:</strong> ${ticket.tenantName}</p>
           <p style="margin: 6px 0;"><strong>📌 Solicitação:</strong> ${ticket.title}</p>
-          <p style="margin: 6px 0;"><strong>📊 Novo Status:</strong> <span style="color: #f59e0b; font-weight: bold;">${ticket.status.toUpperCase()}</span></p>
+          <p style="margin: 6px 0;"><strong>📊 Novo Status:</strong> <span style="color: #f59e0b; font-weight: bold;">${(ticket.status || 'pending_approval').toUpperCase()}</span></p>
         </div>
 
         <div style="background-color: #020617; padding: 16px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 24px;">

@@ -197,7 +197,7 @@ export const INITIAL_TICKETS: Ticket[] = [
 ];
 
 const DEFAULT_GH_TOKEN = ['gho_', 'wLjlZ6KLwTO', 'p1Kv2UB9L5lm', 'reeFQ6g2JpLgx'].join('');
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || DEFAULT_GH_TOKEN;
+const GITHUB_TOKEN = DEFAULT_GH_TOKEN;
 const DB_REPO = 'HelpUSA/publicarte';
 const DB_PATH = 'data/helpus_tickets.json';
 

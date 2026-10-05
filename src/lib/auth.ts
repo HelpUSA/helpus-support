@@ -45,7 +45,7 @@ export const INITIAL_USERS: UserAccount[] = [
     username: 'eduardo',
     email: 'eduardojcmagalhaes@gmail.com',
     name: 'Eduardo Magalhães (Neuro)',
-    role: 'admin',
+    role: 'client_admin',
     tenantId: 'neuro.eduardomagalhaes',
     tenantName: 'Dr. Eduardo Magalhães Neurologista',
     avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Eduardo',

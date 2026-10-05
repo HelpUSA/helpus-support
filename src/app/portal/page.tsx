@@ -518,8 +518,8 @@ export default function ClientPortalPage() {
     window.location.href = '/';
   };
 
-  const isMasterUser = user?.role === 'super_admin' || user?.role === 'admin' || user?.email === 'helpus.ecommerce@gmail.com';
-  const isSuperAdmin = user?.role === 'super_admin' || user?.email === 'helpus.ecommerce@gmail.com';
+  const isMasterUser = user?.role === 'super_admin' || user?.email === 'helpus.ecommerce@gmail.com' || user?.email === 'wagner.redes@gmail.com';
+  const isSuperAdmin = user?.role === 'super_admin' || user?.email === 'helpus.ecommerce@gmail.com' || user?.email === 'wagner.redes@gmail.com';
 
   const availableTenants = INITIAL_TENANTS.filter((t) => {
     if (!user) return false;

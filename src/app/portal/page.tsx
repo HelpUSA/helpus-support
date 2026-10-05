@@ -85,11 +85,17 @@ export default function ClientPortalPage() {
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
 
   const prevTicketsRef = useRef<Map<string, string>>(new Map());
+  const prevProgressRef = useRef<Map<string, number>>(new Map());
+  const selectedTicketRef = useRef<Ticket | null>(null);
   const tenantFilterRef = useRef<string>('all');
 
   useEffect(() => {
     tenantFilterRef.current = tenantFilter;
   }, [tenantFilter]);
+
+  useEffect(() => {
+    selectedTicketRef.current = selectedTicket;
+  }, [selectedTicket]);
 
   useEffect(() => {
     // Process Google OAuth redirect parameters if present
@@ -130,14 +136,16 @@ export default function ClientPortalPage() {
 
     const interval = setInterval(() => {
       loadTickets(tenantFilterRef.current, false);
-    }, 3000);
+    }, 2000);
 
     return () => clearInterval(interval);
   }, []);
 
   const loadTickets = async (filterTenantId: string, isInitial = false) => {
     try {
-      const res = await fetch(`/api/tickets?tenantId=${filterTenantId}`);
+      const res = await fetch(`/api/tickets?tenantId=${filterTenantId}&t=${Date.now()}`, {
+        cache: 'no-store',
+      });
       const data = await res.json();
       
       let fetchedTickets: Ticket[] = data.success ? data.data : [];
@@ -159,27 +167,50 @@ export default function ClientPortalPage() {
       if (!isInitial) {
         fetchedTickets.forEach((t) => {
           const prevStatus = prevTicketsRef.current.get(t.id);
+          const prevProgress = prevProgressRef.current.get(t.id);
+
           if (prevStatus && prevStatus !== t.status) {
             const statusName = getStatusLabel(t.status);
             setStatusAlert(`✨ Notificação em Tempo Real: O chamado [${t.code}] foi atualizado para "${statusName}"!`);
             setTimeout(() => setStatusAlert(null), 6000);
+          } else if (
+            prevProgress !== undefined &&
+            t.progressPercentage !== undefined &&
+            prevProgress !== t.progressPercentage
+          ) {
+            setStatusAlert(
+              `⚡ Progresso em Tempo Real Antigravity [${t.code}]: ${t.progressPercentage}% — ${t.progressStep || 'Processando em segundo plano...'}`
+            );
+            setTimeout(() => setStatusAlert(null), 6000);
           }
+
           prevTicketsRef.current.set(t.id, t.status);
+          if (t.progressPercentage !== undefined) {
+            prevProgressRef.current.set(t.id, t.progressPercentage);
+          }
         });
       } else {
-        fetchedTickets.forEach((t) => prevTicketsRef.current.set(t.id, t.status));
+        fetchedTickets.forEach((t) => {
+          prevTicketsRef.current.set(t.id, t.status);
+          if (t.progressPercentage !== undefined) {
+            prevProgressRef.current.set(t.id, t.progressPercentage);
+          }
+        });
       }
 
       setTickets(fetchedTickets);
       setLastSyncTime(new Date().toLocaleTimeString());
 
-      if (isInitial && fetchedTickets.length > 0 && !selectedTicket) {
-        setSelectedTicket(fetchedTickets[0]);
-      } else if (selectedTicket) {
-        const updatedSelected = fetchedTickets.find((t) => t.id === selectedTicket.id);
+      const activeSelectedId = selectedTicketRef.current?.id;
+      if (activeSelectedId) {
+        const updatedSelected = fetchedTickets.find((t) => t.id === activeSelectedId);
         if (updatedSelected) {
           setSelectedTicket(updatedSelected);
+          selectedTicketRef.current = updatedSelected;
         }
+      } else if (isInitial && fetchedTickets.length > 0) {
+        setSelectedTicket(fetchedTickets[0]);
+        selectedTicketRef.current = fetchedTickets[0];
       }
     } catch (e) {
       console.error('Error fetching tickets:', e);

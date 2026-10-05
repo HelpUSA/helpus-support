@@ -24,7 +24,7 @@ const TENANTS = {
 let cloudSha = null;
 
 async function getGitHubHeaders() {
-  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '';
+  const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || DEFAULT_GH_TOKEN;
   const headers = {
     'User-Agent': 'Antigravity-Watchdog',
     'Accept': 'application/vnd.github+json'

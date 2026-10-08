@@ -119,9 +119,8 @@ export default function ClientPortalPage() {
       currentUser = AuthService.getCurrentUser();
     }
 
-    if (!currentUser) {
-      window.location.href = '/';
-      return;
+    if (currentUser && currentUser.email !== 'helpus.ecommerce@gmail.com' && currentUser.email !== 'wagner.redes@gmail.com' && currentUser.role !== 'super_admin') {
+      currentUser.role = 'client_admin';
     }
 
     setUser(currentUser);

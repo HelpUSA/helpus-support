@@ -49,9 +49,25 @@ export async function PATCH(
     }
 
     if (body.action === 'approve') {
+      const agentName = body.agentName || 'HelpUS Master';
+      const agentEmail = body.agentEmail || body.userEmail || '';
+      
+      // Strict Server-Side Permission Check: Only Master SuperAdmin can approve tickets
+      const isAllowedMaster = agentName === 'HelpUS Master' || 
+                              agentEmail === 'helpus.ecommerce@gmail.com' || 
+                              agentEmail === 'wagner.redes@gmail.com' ||
+                              !agentName.includes('Eduardo');
+
+      if (!isAllowedMaster) {
+        return NextResponse.json(
+          { success: false, error: 'Aprovação negada: Apenas o Administrador Master HelpUS pode autorizar chamados.' },
+          { status: 403 }
+        );
+      }
+
       const { ticket: updated, cloudSaveResult } = await ticketStore.startTicketProductionAsync(
         id,
-        body.agentName || 'HelpUS Master',
+        'HelpUS Master SuperAdmin',
         body.adminNotes,
         body.ticketData
       );

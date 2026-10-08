@@ -584,16 +584,6 @@ class TicketStore {
     let cloudSaveResult;
     if (ticket) {
       cloudSaveResult = await this.saveAsync();
-      // Trigger GitHub Action Watchdog on approval event (0-cost event-driven execution)
-      try {
-        await githubApiRequest('POST', '/repos/HelpUSA/helpus-support/dispatches', {
-          event_type: 'ticket_approved',
-          client_payload: { ticketId: ticket.id, code: ticket.code }
-        });
-        console.log(`[GITHUB DISPATCH] Dispatched ticket_approved event for ${ticket.code}`);
-      } catch (e) {
-        console.error('[GITHUB DISPATCH ERROR]', e);
-      }
     }
     return { ticket, cloudSaveResult };
   }

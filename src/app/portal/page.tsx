@@ -125,9 +125,9 @@ export default function ClientPortalPage() {
 
     setUser(currentUser);
 
-    const initialTenant = (currentUser.role === 'super_admin' || currentUser.role === 'admin')
+    const initialTenant = (currentUser?.role === 'super_admin' || currentUser?.role === 'admin')
       ? 'all'
-      : (currentUser.tenantId || 'publicarte');
+      : (currentUser?.tenantId || 'publicarte');
 
     setTenantFilter(initialTenant);
     tenantFilterRef.current = initialTenant;

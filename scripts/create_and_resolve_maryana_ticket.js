@@ -268,8 +268,8 @@ Todas as pendências relatadas pela usuária Maryana Chaves foram resolvidas:
     port: 587,
     secure: false,
     auth: {
-      user: 'helpus.ecommerce@gmail.com',
-      pass: 'othzlrpmvhhjeyas'
+      user: process.env.SMTP_USER || 'helpus.ecommerce@gmail.com',
+      pass: process.env.SMTP_PASS || ''
     }
   });
 

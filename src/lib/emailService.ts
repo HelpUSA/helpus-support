@@ -23,7 +23,7 @@ class EmailNotificationService {
     const host = process.env.SMTP_HOST || 'smtp.gmail.com';
     const port = Number(process.env.SMTP_PORT) || 587;
     const user = process.env.SMTP_USER || process.env.EMAIL_USER || 'helpus.ecommerce@gmail.com';
-    const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS || 'othzlrpmvhhjeyas';
+    const pass = process.env.SMTP_PASS || process.env.EMAIL_PASS || '';
 
     if (!user || !pass) {
       return null;

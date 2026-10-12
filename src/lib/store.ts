@@ -331,12 +331,29 @@ function githubApiRequest(method: string, path: string, body?: any): Promise<{ s
 }
 
 async function fetchGitHubTickets(): Promise<Ticket[]> {
+  const token = (GITHUB_TOKEN || '').trim();
   try {
-    const res = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
-    if (res.status === 200 && res.data && res.data.content) {
-      cloudSha = res.data.sha;
-      const content = Buffer.from(res.data.content, 'base64').toString('utf-8');
-      const tickets: Ticket[] = JSON.parse(content);
+    // 1. Obter metadata para atualizar cloudSha
+    const meta = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
+    if (meta.status === 200 && meta.data && meta.data.sha) {
+      cloudSha = meta.data.sha;
+      if (meta.data.content) {
+        const content = Buffer.from(meta.data.content, 'base64').toString('utf-8');
+        return JSON.parse(content);
+      }
+    }
+
+    // 2. Quando o arquivo excede 1MB, o GitHub omite 'content'. Buscar via Accept: application/vnd.github.raw
+    const rawApiRes = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, {
+      headers: {
+        'User-Agent': 'HelpUS-Support-Hub',
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github.raw',
+      },
+      cache: 'no-store',
+    });
+    if (rawApiRes.ok) {
+      const tickets: Ticket[] = await rawApiRes.json();
       return tickets;
     }
   } catch (err) {

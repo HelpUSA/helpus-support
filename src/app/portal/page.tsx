@@ -83,6 +83,7 @@ export default function ClientPortalPage() {
 
   // Privacy Modal
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
+  const [sendingEmailTicketId, setSendingEmailTicketId] = useState<string | null>(null);
 
   const prevTicketsRef = useRef<Map<string, string>>(new Map());
   const prevProgressRef = useRef<Map<string, number>>(new Map());
@@ -538,6 +539,28 @@ export default function ClientPortalPage() {
 
   const pendingCount = tickets.filter((t) => t.status === 'pending_approval').length;
 
+  const handleSendTicketEmail = async (ticket: Ticket) => {
+    try {
+      setSendingEmailTicketId(ticket.id);
+      const res = await fetch(`/api/tickets/${ticket.id}/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: ticket.createdByEmail }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatusAlert(`📧 Laudo técnico enviado com sucesso para ${ticket.createdByEmail}!`);
+        setTimeout(() => setStatusAlert(null), 6000);
+      } else {
+        alert(data.error || 'Erro ao enviar e-mail');
+      }
+    } catch (e: any) {
+      alert(`Erro ao conectar com o serviço de e-mail: ${e.message}`);
+    } finally {
+      setSendingEmailTicketId(null);
+    }
+  };
+
   const getStatusLabel = (status: TicketStatus) => {
     switch (status) {
       case 'pending_approval':
@@ -972,12 +995,28 @@ export default function ClientPortalPage() {
                   )}
 
                   {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (
-                    <button
-                      onClick={() => generateTicketPDFReport(selectedTicket)}
-                      className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer"
-                    >
-                      <Printer className="w-4 h-4" /> Baixar PDF (Laudo Técnico)
-                    </button>
+                    <>
+                      <button
+                        onClick={() => generateTicketPDFReport(selectedTicket)}
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer"
+                      >
+                        <Printer className="w-4 h-4" /> Baixar PDF (Laudo Técnico)
+                      </button>
+
+                      <button
+                        onClick={() => handleSendTicketEmail(selectedTicket)}
+                        disabled={sendingEmailTicketId === selectedTicket.id}
+                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                        title={`Disparar e-mail com laudo técnico para ${selectedTicket.createdByEmail}`}
+                      >
+                        {sendingEmailTicketId === selectedTicket.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Mail className="w-4 h-4" />
+                        )}
+                        Enviar por E-mail
+                      </button>
+                    </>
                   )}
                   {getStatusBadge(selectedTicket.status)}
                 </div>

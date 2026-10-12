@@ -11,6 +11,96 @@ export { INITIAL_TENANTS };
 
 export const INITIAL_TICKETS: Ticket[] = [
   {
+    id: "tck-1791240000000",
+    tenantId: "usmle",
+    tenantName: "USMLE Prep Suite",
+    code: "USM-120",
+    title: "Falha de Login Google (Invalid sessionId) e Travamento dos Baralhos de Flashcards",
+    description: "A usuária Maryana Chaves reportou 3 problemas críticos através de áudios e capturas de tela no USMLE Prep Suite (usmle.helpusbr.com): 1) Falha no Login Google com erro 'sessionId: Invalid sessionId'; 2) Botão '+3 dias' dos Flashcards não avança o cartão; 3) Baralhos diferentes exibindo os mesmos cards repetidos.",
+    category: "bug",
+    priority: "urgent",
+    status: "resolved",
+    assignedTo: "HelpUS Master SuperAdmin",
+    createdByEmail: "marychavesmcp@gmail.com",
+    createdByName: "Maryana Chaves",
+    contextData: {
+      url: "https://usmle.helpusbr.com",
+      userEmail: "marychavesmcp@gmail.com",
+      userName: "Maryana Chaves",
+      os: "iPadOS / Chrome & Safari Mobile (Thea AI Reference)",
+      screen: "2048x1536 (iPad Retina)"
+    },
+    attachments: [
+      {
+        id: "att-usmle-01",
+        name: "WhatsApp Image - Erro sessionId no Login Google.jpeg",
+        url: "/uploads/maryana_login_error_sessionid.jpeg",
+        type: "image/jpeg",
+        size: 68117
+      },
+      {
+        id: "att-usmle-02",
+        name: "WhatsApp Image - Referência Thea AI Flashcards iPad.jpeg",
+        url: "/uploads/maryana_ipad_thea_ai.jpeg",
+        type: "image/jpeg",
+        size: 109169
+      }
+    ],
+    messages: [
+      {
+        id: "msg-1791240000001",
+        ticketId: "tck-1791240000000",
+        senderId: "marychavesmcp@gmail.com",
+        senderName: "Maryana Chaves",
+        senderRole: "client",
+        isInternalNote: false,
+        content: "Olá equipe HelpUS! Estou com problemas no login Google (Invalid sessionId), os botões dos flashcards (+3 dias) não avançam e todos os baralhos estão com as mesmas perguntas repetidas. Seguem prints do erro e do app Thea AI no meu iPad.",
+        attachments: [
+          {
+            id: "att-usmle-01",
+            name: "WhatsApp Image - Erro sessionId no Login Google.jpeg",
+            url: "/uploads/maryana_login_error_sessionid.jpeg",
+            type: "image/jpeg",
+            size: 68117
+          },
+          {
+            id: "att-usmle-02",
+            name: "WhatsApp Image - Referência Thea AI Flashcards iPad.jpeg",
+            url: "/uploads/maryana_ipad_thea_ai.jpeg",
+            type: "image/jpeg",
+            size: 109169
+          }
+        ],
+        createdAt: "2026-10-11T21:46:57.000Z"
+      },
+      {
+        id: "msg-1791240000002",
+        ticketId: "tck-1791240000000",
+        senderId: "helpus-master",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "✅ Aprovação Concedida pelo Administrador HelpUS (HelpUS Master SuperAdmin). Autorizando envio para produção com lazy pool PostgreSQL, schemas abertos de sessionId, avanço otimista dos flashcards e 5 baralhos High-Yield.",
+        createdAt: "2026-10-11T21:55:00.000Z"
+      },
+      {
+        id: "msg-1791240000006",
+        ticketId: "tck-1791240000000",
+        senderId: "ia.engine@helpusbr.com",
+        senderName: "IA Autônoma (HelpUS Tech)",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "✨ *[CONCLUÍDO & RESOLVIDO]*: Chamado USM-120 homologado e implantado com sucesso na nuvel Vercel (https://usmle.helpusbr.com). Login Google regularizado, avanço instantâneo nos flashcards ativado e 5 baralhos especializados disponibilizados.",
+        createdAt: "2026-10-11T22:30:00.000Z"
+      }
+    ],
+    adminNotes: "Chamado prioritário homologado e executado em produção na Vercel.",
+    progressPercentage: 100,
+    progressStep: "✨ Concluído e implantado em produção na Vercel (https://usmle.helpusbr.com)",
+    createdAt: "2026-10-11T21:46:57.000Z",
+    updatedAt: "2026-10-11T22:30:00.000Z"
+  },
+  {
     id: "tck-1791048000000",
     tenantId: "neuro.eduardomagalhaes",
     tenantName: "Dr. Eduardo Magalhães Neurologista (Neuro)",

@@ -86,6 +86,63 @@ export function generateTicketPDFReport(ticket: Ticket): void {
         </div>
       </div>
     `;
+  } else if (ticket.tenantId === 'usmle' || textLower.includes('usmle') || textLower.includes('flashcard') || textLower.includes('baralho') || textLower.includes('sessionid')) {
+    screenMockupHtml = `
+      <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 12px;">
+          <span style="font-size: 12px; font-weight: bold; color: #818cf8;">🖥️ CAPTURA DA TELA ATUALIZADA EM PRODUÇÃO — usmle.helpusbr.com</span>
+          <span style="font-size: 10px; background: #1e1b4b; color: #a5b4fc; padding: 2px 8px; border-radius: 12px;">Publicado em Produção na Vercel</span>
+        </div>
+
+        <div style="background: #1e293b; border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
+          <div style="background: #0f172a; padding: 6px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #334155;">
+            <div style="display: flex; gap: 4px;">
+              <span style="width: 8px; height: 8px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #eab308; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
+            </div>
+            <div style="background: #1e293b; color: #94a3b8; font-family: monospace; font-size: 10px; padding: 2px 12px; border-radius: 12px; width: 100%;">
+              https://usmle.helpusbr.com (USMLE Prep Suite — Sessão de Estudo & Baralhos Spaced Repetition)
+            </div>
+          </div>
+
+          <div style="padding: 16px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; align-items: stretch; background: #090d16; color: #ffffff;">
+            <!-- Card 1: ANTES -->
+            <div style="border: 1px solid #ef4444; border-radius: 8px; padding: 10px; text-align: center; background: #1c1117; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 10px; font-weight: bold; color: #f87171; margin-bottom: 6px;">❌ ANTES (Erro Login & Travamento)</div>
+                <img src="/uploads/maryana_login_error_sessionid.jpeg" style="width: 100%; height: 120px; object-fit: contain; border-radius: 6px; background: #000;" alt="Erro sessionId Maryana" />
+              </div>
+              <span style="font-size: 10px; color: #fca5a5; display: block; margin-top: 6px; line-height: 1.3;">
+                Erro "sessionId: Invalid sessionId" no login e botão "+3 dias" travado sem avançar cartão.
+              </span>
+            </div>
+
+            <!-- Card 2: DEPOIS -->
+            <div style="border: 2px solid #22c55e; border-radius: 8px; padding: 10px; text-align: center; background: #0c1f17; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 10px; font-weight: bold; color: #4ade80; margin-bottom: 6px;">✅ DEPOIS (Sessão & Avanço Imediato)</div>
+                <img src="https://images.unsplash.com/photo-1576091160399-112ba8d25d1d?w=400&auto=format&fit=crop&q=80" style="width: 100%; height: 120px; object-fit: cover; border-radius: 6px; border: 1px solid #16a34a;" alt="Sessão USMLE Ativa" />
+              </div>
+              <span style="font-size: 10px; color: #86efac; display: block; font-weight: bold; margin-top: 6px; line-height: 1.3;">
+                Pool lazy resiliente, validação aberta de session e avanço otimista imediato ao clicar na revisão.
+              </span>
+            </div>
+
+            <!-- Card 3: DEPOIS 5 BARALHOS -->
+            <div style="border: 2px solid #6366f1; border-radius: 8px; padding: 10px; text-align: center; background: #131428; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 10px; font-weight: bold; color: #a5b4fc; margin-bottom: 6px;">📚 5 BARALHOS DE ALTO RENDIMENTO</div>
+                <img src="/uploads/maryana_ipad_thea_ai.jpeg" style="width: 100%; height: 120px; object-fit: contain; border-radius: 6px; background: #000;" alt="iPad Thea AI Referência" />
+              </div>
+              <span style="font-size: 10px; color: #c7d2fe; display: block; font-weight: bold; margin-top: 6px; line-height: 1.3;">
+                Farmacologia, Cardiologia, Nutrição 2026, Endocrinologia e Rapid Recall independentes.
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
   } else if (textLower.includes('banner') || textLower.includes('banners') || textLower.includes('lona') || textLower.includes('lonas')) {
     screenMockupHtml = `
       <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">

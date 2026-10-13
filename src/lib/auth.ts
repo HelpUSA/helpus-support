@@ -96,6 +96,20 @@ export const INITIAL_USERS: UserAccount[] = [
     allowedTenantIds: ['usmle'],
     status: 'active',
   },
+  {
+    id: 'usr-naldo',
+    username: 'elinaldogoncalves',
+    email: 'elinaldogoncalves1979@gmail.com',
+    name: 'Elinaldo Gonçalves (Naldo)',
+    role: 'client_admin',
+    tenantId: 'studionaldohair',
+    tenantName: 'Studio Naldo Hair',
+    avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=NaldoHair',
+    googleEmail: 'elinaldogoncalves1979@gmail.com',
+    hasSupportAccess: true,
+    allowedTenantIds: ['studionaldohair'],
+    status: 'active',
+  },
 ];
 
 const AUTH_STORAGE_KEY = 'helpus_auth_user_v2';
@@ -184,9 +198,10 @@ export class AuthService {
       const isEduardo = cleanEmail.includes('eduardo');
       const isKaline = cleanEmail.includes('kaline') || cleanEmail.includes('augustokaline');
       const isMaryana = cleanEmail.includes('marychaves') || cleanEmail.includes('maryana');
-      const userTenantId = isMaryana ? 'usmle' : (isKaline ? 'kaline-modas' : (isEduardo ? 'neuro.eduardomagalhaes' : 'publicarte'));
-      const userTenantName = isMaryana ? 'USMLE Prep Suite' : (isKaline ? 'Kaline Modas' : (isEduardo ? 'Dr. Eduardo Magalhães Neurologista' : 'Public Arte'));
-      const defaultName = isMaryana ? 'Maryana Chaves' : (name || cleanEmail.split('@')[0]);
+      const isNaldo = cleanEmail.includes('elinaldo') || cleanEmail.includes('naldo');
+      const userTenantId = isNaldo ? 'studionaldohair' : (isMaryana ? 'usmle' : (isKaline ? 'kaline-modas' : (isEduardo ? 'neuro.eduardomagalhaes' : 'publicarte')));
+      const userTenantName = isNaldo ? 'Studio Naldo Hair' : (isMaryana ? 'USMLE Prep Suite' : (isKaline ? 'Kaline Modas' : (isEduardo ? 'Dr. Eduardo Magalhães Neurologista' : 'Public Arte')));
+      const defaultName = isNaldo ? 'Elinaldo Gonçalves (Naldo)' : (isMaryana ? 'Maryana Chaves' : (name || cleanEmail.split('@')[0]));
 
       userAccount = {
         id: `usr-google-${Date.now()}`,
@@ -194,7 +209,7 @@ export class AuthService {
         email: cleanEmail,
         googleEmail: cleanEmail,
         name: defaultName,
-        role: (isKaline || isEduardo || isMaryana) ? 'client_admin' : 'client_user',
+        role: (isKaline || isEduardo || isMaryana || isNaldo) ? 'client_admin' : 'client_user',
         tenantId: userTenantId,
         tenantName: userTenantName,
         avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanEmail}`,

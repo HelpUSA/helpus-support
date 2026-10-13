@@ -56,6 +56,7 @@ export const INITIAL_TENANTS: Tenant[] = [
   { id: 'queijeira_504', name: 'Queijeira 504 - Queijos Artesanais', slug: 'queijeira_504', domain: 'queijeira504.helpusbr.com', primaryColor: '#d97706', apiKey: 'qj_live_50491827a', createdAt: '2026-10-01T10:00:00Z' },
   { id: 'realestate', name: 'Real Estate Portal', slug: 'realestate', domain: 'imoveis.helpusbr.com', primaryColor: '#0f766e', apiKey: 'rea_live_039', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'saude', name: 'Saúde App', slug: 'saude', domain: 'saude.helpusbr.com', primaryColor: '#047857', apiKey: 'sau_live_040', createdAt: '2026-09-01T10:00:00Z' },
+  { id: 'studionaldohair', name: 'Studio Naldo Hair', slug: 'studionaldohair', domain: 'studionaldohair.helpusbr.com', primaryColor: '#d4af37', apiKey: 'snh_live_047', createdAt: '2026-10-13T12:00:00Z' },
   { id: 'tatica', name: 'Tática Assessoria Contábil', slug: 'tatica', domain: 'tatica.helpusbr.com', primaryColor: '#059669', apiKey: 'tat_live_81923012b', createdAt: '2026-09-05T12:00:00Z' },
   { id: 'trading-lab', name: 'Trading Lab', slug: 'trading-lab', domain: 'trading.helpusbr.com', primaryColor: '#15803d', apiKey: 'trd_live_041', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'tulio-bicicletas-site', name: 'Túlio Bicicletas', slug: 'tulio-bicicletas-site', domain: 'tuliobicicletas.com.br', primaryColor: '#c2410c', apiKey: 'tul_live_042', createdAt: '2026-09-01T10:00:00Z' },

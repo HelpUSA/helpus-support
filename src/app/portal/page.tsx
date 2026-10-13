@@ -337,6 +337,8 @@ export default function ClientPortalPage() {
         'neuro.eduardomagalhaes': 'Dr. Eduardo Magalhães Neurologista (Neuro)',
         tatica: 'Tática Assessoria Contábil',
         'fba-suite': 'HelpUs FBA Suite',
+        studionaldohair: 'Studio Naldo Hair',
+        usmle: 'USMLE Prep Suite',
       };
 
       const finalTenantId = isMasterUser ? (targetTenantId || selectedTicket?.tenantId || user?.tenantId || 'neuro.eduardomagalhaes') : (selectedTicket?.tenantId || user?.tenantId || 'neuro.eduardomagalhaes');

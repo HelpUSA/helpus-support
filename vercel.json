@@ -1,7 +1,12 @@
 {
   "git": {
-    "skipBuildCommand": "git diff HEAD^ HEAD --quiet ."
+    "deploymentEnabled": {
+      "*": false,
+      "main": true,
+      "master": true
+    }
   },
+  "ignoreCommand": "git diff HEAD^ HEAD --quiet .",
   "headers": [
     {
       "source": "/assets/(.*)",

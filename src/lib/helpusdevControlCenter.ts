@@ -125,8 +125,18 @@ export interface ControlCenterState {
   tasks: Record<string, HelpUSDevTaskProjection>;
   agents: Record<string, HelpUSDevAgentStatus>;
   intents: HelpUSDevIntentV1[];
-  batch_idempotency_cache: Record<string, { processed_at_utc: string; accepted_count: number; duplicate_count: number; state_version: number }>;
+  batch_idempotency_cache: Record<
+    string,
+    {
+      processed_at_utc: string;
+      accepted_count: number;
+      duplicate_count: number;
+      accepted_event_ids: string[];
+      state_version: number;
+    }
+  >;
   used_nonces: Record<string, number>;
+  rate_limit_buckets: Record<string, { count: number; resetAt: number }>;
 }
 
 const DEFAULT_STALE_THRESHOLD_SEC = 120;
@@ -150,9 +160,43 @@ const FORBIDDEN_SECRET_PATTERNS = [
 
 const SERVER_SESSION_SECRET = process.env.HELPUSDEV_CC_SESSION_SECRET || 'r18-local-sovereign-session-hmac-key';
 const DEVICE_SYNC_SECRET = process.env.HELPUSDEV_CC_DEVICE_SECRET || 'r18-local-sovereign-device-hmac-key';
-const STATE_FILE_PATH = path.join(process.cwd(), '.helpusdev_control_center_state.json');
+const DEVICE_ROTATED_SECRET = process.env.HELPUSDEV_CC_DEVICE_SECRET_V2 || 'r18-local-sovereign-device-hmac-key-v2-rotated';
 
-const rateLimitBuckets: Map<string, { count: number; resetAt: number }> = new Map();
+export interface DeviceKeyRecord {
+  key_id: string;
+  secret: string;
+  expires_at_sec: number;
+  revoked: boolean;
+}
+
+export const DEVICE_KEYRING: Record<string, DeviceKeyRecord> = {
+  'key-r18-primary': {
+    key_id: 'key-r18-primary',
+    secret: DEVICE_SYNC_SECRET,
+    expires_at_sec: 4102444800, // 2099-12-31
+    revoked: false,
+  },
+  'key-r18-rotated-v2': {
+    key_id: 'key-r18-rotated-v2',
+    secret: DEVICE_ROTATED_SECRET,
+    expires_at_sec: 4102444800,
+    revoked: false,
+  },
+  'key-r18-expired': {
+    key_id: 'key-r18-expired',
+    secret: 'r18-expired-device-secret',
+    expires_at_sec: 1700000000, // Expired in past
+    revoked: false,
+  },
+  'key-r18-revoked': {
+    key_id: 'key-r18-revoked',
+    secret: 'r18-revoked-device-secret',
+    expires_at_sec: 4102444800,
+    revoked: true,
+  },
+};
+
+const STATE_FILE_PATH = path.join(process.cwd(), '.helpusdev_control_center_state.json');
 
 function createInitialState(): ControlCenterState {
   return {
@@ -222,6 +266,7 @@ function createInitialState(): ControlCenterState {
     intents: [],
     batch_idempotency_cache: {},
     used_nonces: {},
+    rate_limit_buckets: {},
   };
 }
 
@@ -229,7 +274,10 @@ export function loadControlCenterState(): ControlCenterState {
   try {
     if (fs.existsSync(STATE_FILE_PATH)) {
       const raw = fs.readFileSync(STATE_FILE_PATH, 'utf-8');
-      return JSON.parse(raw) as ControlCenterState;
+      const parsed = JSON.parse(raw) as ControlCenterState;
+      if (!parsed.rate_limit_buckets) parsed.rate_limit_buckets = {};
+      if (!parsed.used_nonces) parsed.used_nonces = {};
+      return parsed;
     }
   } catch {
     // Fallback to clean state
@@ -238,13 +286,15 @@ export function loadControlCenterState(): ControlCenterState {
 }
 
 export function saveControlCenterState(state: ControlCenterState): void {
-  fs.writeFileSync(STATE_FILE_PATH, JSON.stringify(state, null, 2), 'utf-8');
+  const tmpPath = `${STATE_FILE_PATH}.tmp.${process.pid}.${Date.now()}`;
+  const serialized = JSON.stringify(state, null, 2);
+  fs.writeFileSync(tmpPath, serialized, { encoding: 'utf-8', flag: 'w' });
+  fs.renameSync(tmpPath, STATE_FILE_PATH);
 }
 
 export function resetControlCenterStateForTests(): ControlCenterState {
   const fresh = createInitialState();
   saveControlCenterState(fresh);
-  rateLimitBuckets.clear();
   return fresh;
 }
 
@@ -268,17 +318,18 @@ export function redactSensitiveSummary(input: string): { clean: string; hadSecre
 /**
  * Issue a server-signed SuperAdmin session token (used for backend RBAC + tenant verification).
  */
-export function issueServerSessionToken(userId: string, tenantId: string): string {
+export function issueServerSessionToken(userId: string, tenantId: string, ttlSec: number = 3600): string {
   const user = INITIAL_USERS.find((u) => u.id === userId);
   if (!user) throw new Error(`Unknown user_id: ${userId}`);
+  const nowSec = Math.floor(Date.now() / 1000);
   const payload = JSON.stringify({
     sub: user.id,
     role: user.role,
     tenant_id: tenantId,
     allowed_tenants: user.allowedTenantIds,
     status: user.status,
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 3600,
+    iat: nowSec,
+    exp: nowSec + ttlSec,
   });
   const b64 = Buffer.from(payload, 'utf-8').toString('base64url');
   const sig = crypto.createHmac('sha256', SERVER_SESSION_SECRET).update(b64).digest('base64url');
@@ -361,6 +412,7 @@ export function verifySuperAdminRequest(headers: Record<string, string | undefin
 
 /**
  * CSRF & Rate Limit enforcement for mutating SuperAdmin endpoints (R18-09).
+ * Persists rate-limit counters durably on disk so multi-instance / restart cannot bypass limits.
  */
 export function enforceCsrfAndRateLimit(
   actorId: string,
@@ -373,10 +425,12 @@ export function enforceCsrfAndRateLimit(
     return { ok: false, httpStatus: 403, error: 'csrf_token_mismatch_or_missing' };
   }
 
+  const state = loadControlCenterState();
   const now = Date.now();
-  const bucket = rateLimitBuckets.get(actorId);
+  const bucket = state.rate_limit_buckets[actorId];
   if (!bucket || now > bucket.resetAt) {
-    rateLimitBuckets.set(actorId, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    state.rate_limit_buckets[actorId] = { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS };
+    saveControlCenterState(state);
     return { ok: true, httpStatus: 200 };
   }
 
@@ -384,52 +438,77 @@ export function enforceCsrfAndRateLimit(
     return { ok: false, httpStatus: 429, error: 'rate_limit_exceeded' };
   }
   bucket.count += 1;
+  saveControlCenterState(state);
   return { ok: true, httpStatus: 200 };
 }
 
 /**
  * Sign and verify Windows Host Device sync requests (outbound HTTPS from ai-bridge-local).
+ * Supports key rotation (x-helpusdev-key-id), expiration, revocation, and durable anti-replay nonces.
  */
-export function signDevicePayload(hostId: string, timestampSec: number, nonce: string, bodyJson: string): string {
-  const canonical = `${hostId}|${timestampSec}|${nonce}|${bodyJson}`;
-  return crypto.createHmac('sha256', DEVICE_SYNC_SECRET).update(canonical).digest('hex');
+export function signDevicePayload(
+  hostId: string,
+  timestampSec: number,
+  nonce: string,
+  bodyJson: string,
+  keyId: string = 'key-r18-primary'
+): string {
+  const keyRec = DEVICE_KEYRING[keyId] || DEVICE_KEYRING['key-r18-primary'];
+  const canonical = `${keyId}|${hostId}|${timestampSec}|${nonce}|${bodyJson}`;
+  return crypto.createHmac('sha256', keyRec.secret).update(canonical).digest('hex');
 }
 
 export function verifyDeviceRequest(
   headers: Record<string, string | undefined>,
   bodyJson: string,
-  state: ControlCenterState
-): { ok: boolean; httpStatus: number; error?: string; hostId?: string } {
+  stateOverride?: ControlCenterState
+): { ok: boolean; httpStatus: number; error?: string; hostId?: string; keyId?: string } {
   const hostId = headers['x-helpusdev-host-id'] || '';
   const tsStr = headers['x-helpusdev-timestamp'] || '';
   const nonce = headers['x-helpusdev-nonce'] || '';
   const sig = headers['x-helpusdev-signature'] || '';
+  const keyId = headers['x-helpusdev-key-id'] || 'key-r18-primary';
 
   if (!hostId || !tsStr || !nonce || !sig) {
     return { ok: false, httpStatus: 401, error: 'missing_device_auth_headers' };
   }
 
+  const keyRec = DEVICE_KEYRING[keyId];
+  if (!keyRec) {
+    return { ok: false, httpStatus: 401, error: 'unknown_device_key_id' };
+  }
+  if (keyRec.revoked) {
+    return { ok: false, httpStatus: 401, error: 'device_key_revoked' };
+  }
+
   const ts = Number(tsStr);
   const nowSec = Math.floor(Date.now() / 1000);
+  if (nowSec > keyRec.expires_at_sec) {
+    return { ok: false, httpStatus: 401, error: 'device_key_expired' };
+  }
   if (!Number.isFinite(ts) || Math.abs(nowSec - ts) > REPLAY_WINDOW_SEC) {
     return { ok: false, httpStatus: 401, error: 'device_timestamp_outside_replay_window' };
   }
 
+  const state = stateOverride || loadControlCenterState();
   if (state.used_nonces[nonce] && state.used_nonces[nonce] > nowSec - REPLAY_WINDOW_SEC) {
     return { ok: false, httpStatus: 409, error: 'device_nonce_replay_detected' };
   }
 
-  const expectedSig = signDevicePayload(hostId, ts, nonce, bodyJson);
+  const expectedSig = signDevicePayload(hostId, ts, nonce, bodyJson, keyId);
   if (sig.length !== expectedSig.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) {
     return { ok: false, httpStatus: 401, error: 'invalid_device_hmac_signature' };
   }
 
+  // Persist used_nonce durably on disk so replay across instances or restarts is blocked
   state.used_nonces[nonce] = nowSec;
-  return { ok: true, httpStatus: 200, hostId };
+  saveControlCenterState(state);
+  return { ok: true, httpStatus: 200, hostId, keyId };
 }
 
 /**
  * Ingest a batch of canonical events (helpusdev.event.v1) idempotently (R18-04, R18-05, R18-06, R18-09).
+ * Returns durable_persisted=true and accepted_event_ids only after atomic disk write succeeds.
  */
 export function ingestEventBatch(
   batchId: string,
@@ -439,8 +518,10 @@ export function ingestEventBatch(
   ok: boolean;
   httpStatus: number;
   cached: boolean;
+  durable_persisted: boolean;
   accepted_count: number;
   duplicate_count: number;
+  accepted_event_ids: string[];
   seq_gaps_detected: number;
   state_version: number;
   error?: string;
@@ -454,8 +535,10 @@ export function ingestEventBatch(
       ok: true,
       httpStatus: 200,
       cached: true,
+      durable_persisted: fs.existsSync(STATE_FILE_PATH),
       accepted_count: cached.accepted_count,
       duplicate_count: cached.duplicate_count,
+      accepted_event_ids: cached.accepted_event_ids || [],
       seq_gaps_detected: 0,
       state_version: cached.state_version,
     };
@@ -465,11 +548,13 @@ export function ingestEventBatch(
   let accepted = 0;
   let duplicates = 0;
   let gapsDetected = 0;
+  const acceptedEventIds: string[] = [];
 
   const sorted = [...events].sort((a, b) => a.seq - b.seq);
   for (const ev of sorted) {
     if (existingIds.has(ev.event_id)) {
       duplicates += 1;
+      acceptedEventIds.push(ev.event_id); // Already durably persisted earlier, safe for outbox ACK
       continue;
     }
 
@@ -479,8 +564,10 @@ export function ingestEventBatch(
         ok: false,
         httpStatus: 422,
         cached: false,
+        durable_persisted: false,
         accepted_count: 0,
         duplicate_count: 0,
+        accepted_event_ids: [],
         seq_gaps_detected: 0,
         state_version: state.state_version,
         error: `plaintext_secret_rejected_in_event_${ev.event_id}`,
@@ -522,6 +609,7 @@ export function ingestEventBatch(
 
     state.events.push(sanitizedEvent);
     existingIds.add(ev.event_id);
+    acceptedEventIds.push(ev.event_id);
     accepted += 1;
 
     // Update agent observed timestamps without ever conflating delivery_acked with model_reply_observed
@@ -559,16 +647,20 @@ export function ingestEventBatch(
     processed_at_utc: state.last_sync_utc,
     accepted_count: accepted,
     duplicate_count: duplicates,
+    accepted_event_ids: acceptedEventIds,
     state_version: state.state_version,
   };
 
   saveControlCenterState(state);
+  const verifiedDisk = fs.existsSync(STATE_FILE_PATH);
   return {
-    ok: true,
-    httpStatus: 200,
+    ok: verifiedDisk,
+    httpStatus: verifiedDisk ? 200 : 500,
     cached: false,
+    durable_persisted: verifiedDisk,
     accepted_count: accepted,
     duplicate_count: duplicates,
+    accepted_event_ids: acceptedEventIds,
     seq_gaps_detected: gapsDetected,
     state_version: state.state_version,
   };
@@ -589,6 +681,7 @@ export function submitAdminIntent(params: {
   expected_state_version: number;
   approval_scope?: string;
   step_up_token?: string;
+  ttl_sec?: number;
 }): { ok: boolean; httpStatus: number; error?: string; intent?: HelpUSDevIntentV1; current_state_version?: number } {
   const state = loadControlCenterState();
 
@@ -613,7 +706,8 @@ export function submitAdminIntent(params: {
   }
 
   const nowIso = new Date().toISOString();
-  const expiresIso = new Date(Date.now() + 300_000).toISOString();
+  const ttlMs = (params.ttl_sec ?? 300) * 1000;
+  const expiresIso = new Date(Date.now() + ttlMs).toISOString();
   const intentId = `intent-r18-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
   const sigPayload = `${intentId}|${params.actor.id}|${params.host_id}|${params.workspace_id}|${params.target_id}|${params.verb}|${params.expected_state_version}|${params.nonce}`;
   const signature = crypto.createHmac('sha256', DEVICE_SYNC_SECRET).update(sigPayload).digest('hex');
@@ -642,6 +736,60 @@ export function submitAdminIntent(params: {
   state.state_version += 1;
   saveControlCenterState(state);
   return { ok: true, httpStatus: 201, intent, current_state_version: state.state_version };
+}
+
+/**
+ * Acknowledge or expire an administrative intent from the Windows Host Worker, persisted durably on disk.
+ */
+export function ackAdminIntent(
+  intentId: string,
+  targetStatus: IntentStatus,
+  detail: string,
+  nowEpochMs: number = Date.now()
+): {
+  ok: boolean;
+  httpStatus: number;
+  error?: string;
+  intent_id?: string;
+  status?: IntentStatus;
+  state_version?: number;
+} {
+  const state = loadControlCenterState();
+  const found = state.intents.find((i) => i.intent_id === intentId);
+  if (!found) {
+    return { ok: false, httpStatus: 404, error: 'intent_not_found' };
+  }
+
+  const expiresMs = Date.parse(found.expires_at_utc);
+  if (!Number.isNaN(expiresMs) && nowEpochMs > expiresMs) {
+    found.status = 'expired';
+    found.host_ack_detail = 'Intent expired before host execution.';
+    found.acked_at_utc = new Date(nowEpochMs).toISOString();
+    state.state_version += 1;
+    saveControlCenterState(state);
+    return {
+      ok: false,
+      httpStatus: 409,
+      error: 'intent_expired',
+      intent_id: found.intent_id,
+      status: found.status,
+      state_version: state.state_version,
+    };
+  }
+
+  found.status = targetStatus;
+  found.host_ack_detail = redactSensitiveSummary(detail).clean;
+  found.acked_at_utc = new Date(nowEpochMs).toISOString();
+  state.state_version += 1;
+  saveControlCenterState(state);
+
+  return {
+    ok: true,
+    httpStatus: 200,
+    intent_id: found.intent_id,
+    status: found.status,
+    state_version: state.state_version,
+  };
 }
 
 /**

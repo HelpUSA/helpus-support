@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   ingestEventBatch,
-  loadControlCenterState,
   verifyDeviceRequest,
 } from '@/lib/helpusdevControlCenter';
 
@@ -12,8 +11,7 @@ export async function POST(req: NextRequest) {
     headersObj[k.toLowerCase()] = v;
   });
 
-  const state = loadControlCenterState();
-  const devAuth = verifyDeviceRequest(headersObj, rawBody, state);
+  const devAuth = verifyDeviceRequest(headersObj, rawBody);
   if (!devAuth.ok) {
     return NextResponse.json({ ok: false, error: devAuth.error }, { status: devAuth.httpStatus });
   }

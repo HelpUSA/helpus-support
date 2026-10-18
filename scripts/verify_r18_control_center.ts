@@ -4,8 +4,11 @@ import {
   resetControlCenterStateForTests,
   closeControlCenterDb,
   ControlCenterStorageIntegrityError,
+  getRequiredSecrets,
   authenticateSuperAdminCredentials,
   issueServerSessionToken,
+  revokeSuperAdminSession,
+  updateControlCenterUserPrivilege,
   issueCsrfToken,
   verifySuperAdminRequest,
   enforceCsrfAndRateLimit,
@@ -369,7 +372,130 @@ function runVerification() {
     geminiRec.last_model_reply_observed_utc === null &&
     geminiRec.last_output_validated_utc === null;
 
+  // R19 Priority 2: Serverless Ephemeral SQLite Guard (must fail closed if VERCEL=1 without shared remote DB)
+  process.env.HELPUSDEV_CC_SIMULATE_VERCEL_SERVERLESS = '1';
+  let serverlessBlocked: boolean = false;
+  try {
+    loadControlCenterState();
+  } catch (err: any) {
+    if (String(err?.message || '').includes('serverless_ephemeral_sqlite_blocked')) {
+      serverlessBlocked = true;
+    }
+  } finally {
+    delete process.env.HELPUSDEV_CC_SIMULATE_VERCEL_SERVERLESS;
+  }
+
+  // R19 Priority 3: Session Revocation & Live Privilege Demotion Invalidation
+  const revocableToken = issueServerSessionToken('usr-wagner', 'helpus-support', 3600);
+  const beforeRevokeCheck = verifySuperAdminRequest({
+    authorization: `Bearer ${revocableToken}`,
+    'x-helpus-tenant-id': 'helpus-support',
+  });
+  revokeSuperAdminSession(revocableToken, 'r19_security_test_revocation');
+  const afterRevokeCheck = verifySuperAdminRequest({
+    authorization: `Bearer ${revocableToken}`,
+    'x-helpus-tenant-id': 'helpus-support',
+  });
+
+  const demoteTestToken = issueServerSessionToken('usr-wagner', 'helpus-support', 3600);
+  updateControlCenterUserPrivilege('usr-wagner', { role: 'client_admin' });
+  const afterDemoteCheck = verifySuperAdminRequest({
+    authorization: `Bearer ${demoteTestToken}`,
+    'x-helpus-tenant-id': 'helpus-support',
+  });
+  updateControlCenterUserPrivilege('usr-wagner', { role: 'super_admin', status: 'active', hasSupportAccess: true });
+  const afterRestoreCheck = verifySuperAdminRequest({
+    authorization: `Bearer ${demoteTestToken}`,
+    'x-helpus-tenant-id': 'helpus-support',
+  });
+
+  // R19 Priority 4: Purpose-Separated 5 HMAC Keys + Key Reuse Rejection
+  const loadedSecrets = getRequiredSecrets();
+  const distinctSecretCount = new Set([
+    loadedSecrets.sessionSecret,
+    loadedSecrets.csrfSecret,
+    loadedSecrets.intentSigningSecret,
+    loadedSecrets.deviceSecretPrimary,
+    loadedSecrets.deviceSecretRotatedV2,
+  ]).size;
+  process.env.HELPUSDEV_CC_CSRF_SECRET = loadedSecrets.sessionSecret; // Attempt illegal key reuse across purposes
+  const keyReuseCheck = verifySuperAdminRequest({
+    authorization: `Bearer ${demoteTestToken}`,
+    'x-helpus-tenant-id': 'helpus-support',
+  });
+  delete process.env.HELPUSDEV_CC_CSRF_SECRET;
+
+  // R19 Priority 5: Simulated Power Loss Mid-Transaction Rollback
+  const stateBeforeCrash = loadControlCenterState();
+  process.env.HELPUSDEV_CC_SIMULATE_MID_TX_CRASH = '1';
+  let midTxRolledBack: boolean = false;
+  try {
+    ingestEventBatch('batch-power-loss-sim', [
+      {
+        schema: 'helpusdev.event.v1',
+        event_id: 'ev-power-loss-99999',
+        host_id: hostId,
+        workspace_id: workspaceId,
+        seq: 88888,
+        workflow_id: 'wf',
+        task_id: 't-crash',
+        correlation_id: 'c-crash',
+        event_type: 'task.started',
+        occurred_at_utc: new Date().toISOString(),
+        observed_at_utc: new Date().toISOString(),
+        agent: 'antigravity',
+        status: 'running',
+        summary_redacted: 'Should be rolled back on simulated power loss',
+        attempt_no: 1,
+      },
+    ]);
+  } catch (err: any) {
+    if (String(err?.message || '').includes('simulated_power_loss_mid_transaction')) {
+      midTxRolledBack = true;
+    }
+  } finally {
+    delete process.env.HELPUSDEV_CC_SIMULATE_MID_TX_CRASH;
+  }
+  const stateAfterCrash = loadControlCenterState();
+  const powerLossRollbackIntact =
+    midTxRolledBack &&
+    stateAfterCrash.state_version === stateBeforeCrash.state_version &&
+    stateAfterCrash.events.length === stateBeforeCrash.events.length &&
+    !stateAfterCrash.batch_idempotency_cache['batch-power-loss-sim'];
+
   const output = {
+    R19_P2_SERVERLESS_GUARD: {
+      pass: Boolean(serverlessBlocked),
+      serverless_ephemeral_sqlite_blocked: serverlessBlocked,
+    },
+    R19_P3_SESSION_REVOCATION_AND_PRIVILEGE_DEMOTION: {
+      pass:
+        beforeRevokeCheck.httpStatus === 200 &&
+        afterRevokeCheck.httpStatus === 401 &&
+        afterRevokeCheck.error === 'session_revoked' &&
+        afterDemoteCheck.httpStatus === 403 &&
+        afterRestoreCheck.httpStatus === 200,
+      before_revoke_status: beforeRevokeCheck.httpStatus,
+      after_revoke_status: afterRevokeCheck.httpStatus,
+      after_revoke_error: afterRevokeCheck.error,
+      after_demote_status: afterDemoteCheck.httpStatus,
+      after_demote_error: afterDemoteCheck.error,
+      after_restore_status: afterRestoreCheck.httpStatus,
+    },
+    R19_P4_KEY_SEPARATION: {
+      pass: distinctSecretCount === 5 && keyReuseCheck.httpStatus === 503,
+      distinct_purpose_keys_count: distinctSecretCount,
+      key_reuse_across_purposes_status: keyReuseCheck.httpStatus,
+      key_reuse_error: keyReuseCheck.error,
+    },
+    R19_P5_POWER_LOSS_MID_TX_ROLLBACK: {
+      pass: Boolean(powerLossRollbackIntact),
+      mid_tx_exception_caught: midTxRolledBack,
+      version_before: stateBeforeCrash.state_version,
+      version_after: stateAfterCrash.state_version,
+      events_before: stateBeforeCrash.events.length,
+      events_after: stateAfterCrash.events.length,
+    },
     R18_P0_SECRETS: {
       pass:
         missingSecretSessionRes.httpStatus === 503 &&
@@ -380,7 +506,7 @@ function runVerification() {
       missing_secret_device_status: missingSecretDeviceVerify.httpStatus,
     },
     R18_P1_CORRUPTION_FAIL_CLOSED: {
-      pass: corruptionFailedClosed === true,
+      pass: Boolean(corruptionFailedClosed),
       failed_closed_on_corrupt_sqlite: corruptionFailedClosed,
       error_code: corruptionErrorCode,
     },

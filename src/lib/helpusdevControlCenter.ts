@@ -202,14 +202,16 @@ const REVOKED_LEGACY_SECRETS = new Set([
 
 export interface ExternalSecretsBundle {
   sessionSecret: string;
+  csrfSecret: string;
+  intentSigningSecret: string;
   deviceSecretPrimary: string;
   deviceSecretRotatedV2: string;
 }
 
 /**
- * P0 Remediation: Never use hardcoded fallback HMAC secrets in repository code.
- * Reads from environment variables or external secrets file outside the repository.
- * Fails closed (HTTP 503) if secrets are missing, short, or match revoked legacy strings.
+ * P0 & R19 Priority 4 Remediation: Never use hardcoded fallback HMAC secrets in repository code,
+ * and enforce strict cryptographic separation by purpose across all 5 secrets.
+ * Fails closed (HTTP 503) if secrets are missing, short, match revoked legacy strings, or reuse keys across purposes.
  */
 export function getRequiredSecrets(): ExternalSecretsBundle {
   if (process.env.HELPUSDEV_CC_FORCE_MISSING_SECRETS === '1') {
@@ -217,16 +219,20 @@ export function getRequiredSecrets(): ExternalSecretsBundle {
   }
 
   let sessionSecret = process.env.HELPUSDEV_CC_SESSION_SECRET || '';
+  let csrfSecret = process.env.HELPUSDEV_CC_CSRF_SECRET || '';
+  let intentSigningSecret = process.env.HELPUSDEV_CC_INTENT_SECRET || '';
   let deviceSecretPrimary = process.env.HELPUSDEV_CC_DEVICE_SECRET || '';
   let deviceSecretRotatedV2 = process.env.HELPUSDEV_CC_DEVICE_SECRET_V2 || '';
 
-  if (!sessionSecret || !deviceSecretPrimary || !deviceSecretRotatedV2) {
+  if (!sessionSecret || !csrfSecret || !intentSigningSecret || !deviceSecretPrimary || !deviceSecretRotatedV2) {
     const secretsFile =
       process.env.HELPUSDEV_CC_SECRETS_FILE || 'D:/AntiG/ai-bridge-local/.helpusdev_secrets.json';
     if (fs.existsSync(secretsFile)) {
       try {
         const parsed = JSON.parse(fs.readFileSync(secretsFile, 'utf-8'));
         sessionSecret = sessionSecret || String(parsed.session_secret || '');
+        csrfSecret = csrfSecret || String(parsed.csrf_secret || '');
+        intentSigningSecret = intentSigningSecret || String(parsed.intent_signing_secret || '');
         deviceSecretPrimary = deviceSecretPrimary || String(parsed.device_secret_primary || '');
         deviceSecretRotatedV2 = deviceSecretRotatedV2 || String(parsed.device_secret_rotated_v2 || '');
       } catch (err: any) {
@@ -235,11 +241,15 @@ export function getRequiredSecrets(): ExternalSecretsBundle {
     }
   }
 
-  for (const [label, val] of [
+  const entries = [
     ['session_secret', sessionSecret],
+    ['csrf_secret', csrfSecret],
+    ['intent_signing_secret', intentSigningSecret],
     ['device_secret_primary', deviceSecretPrimary],
     ['device_secret_rotated_v2', deviceSecretRotatedV2],
-  ] as const) {
+  ] as const;
+
+  for (const [label, val] of entries) {
     if (!val || val.length < 32) {
       throw new MissingControlCenterSecretError(`${label}_missing_or_shorter_than_32_chars`);
     }
@@ -248,7 +258,18 @@ export function getRequiredSecrets(): ExternalSecretsBundle {
     }
   }
 
-  return { sessionSecret, deviceSecretPrimary, deviceSecretRotatedV2 };
+  const uniqueKeys = new Set(entries.map(([, v]) => v));
+  if (uniqueKeys.size !== entries.length) {
+    throw new MissingControlCenterSecretError('hmac_key_reuse_across_purposes_forbidden');
+  }
+
+  return {
+    sessionSecret,
+    csrfSecret,
+    intentSigningSecret,
+    deviceSecretPrimary,
+    deviceSecretRotatedV2,
+  };
 }
 
 export interface DeviceKeyRecord {
@@ -353,10 +374,22 @@ function defaultAgentsMap(): Record<string, HelpUSDevAgentStatus> {
 }
 
 /**
- * P1 Remediation: Open transactional SQLite database with WAL + busy_timeout.
- * Never silently recreates empty state on file corruption — fails closed with ControlCenterStorageIntegrityError.
+ * P1 & R19 Priority 2 Remediation: Open transactional SQLite database with WAL + busy_timeout on sovereign Node host.
+ * Fails closed if executed in an ephemeral Vercel serverless environment without a shared remote transactional DB URL,
+ * and fails closed on file corruption (never silently recreates empty state).
  */
 function openControlCenterDb() {
+  const isServerless =
+    process.env.VERCEL === '1' || process.env.HELPUSDEV_CC_SIMULATE_VERCEL_SERVERLESS === '1';
+  const hasRemoteSharedDb = Boolean(
+    process.env.HELPUSDEV_CC_REMOTE_DB_URL || process.env.POSTGRES_URL || process.env.TURSO_DATABASE_URL
+  );
+  if (isServerless && !hasRemoteSharedDb) {
+    throw new ControlCenterStorageIntegrityError(
+      'serverless_ephemeral_sqlite_blocked_require_shared_transactional_db'
+    );
+  }
+
   const dbPath = getControlCenterSqlitePath();
   if (fs.existsSync(dbPath)) {
     const stat = fs.statSync(dbPath);
@@ -461,11 +494,30 @@ function openControlCenterDb() {
       count INTEGER NOT NULL,
       reset_at_ms INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS cc_sessions (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      tenant_id TEXT NOT NULL,
+      issued_at_sec INTEGER NOT NULL,
+      expires_at_sec INTEGER NOT NULL,
+      revoked INTEGER NOT NULL DEFAULT 0,
+      revoked_reason TEXT
+    );
+    CREATE TABLE IF NOT EXISTS cc_user_privileges (
+      user_id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      status TEXT NOT NULL,
+      has_support_access INTEGER NOT NULL DEFAULT 1,
+      allowed_tenants_json TEXT NOT NULL,
+      updated_at_utc TEXT NOT NULL
+    );
   `);
 
-  // Seed initial metadata and default agents inside an immediate transaction if not present
+  // Seed initial metadata, default agents, and server-side user privileges inside an immediate transaction if not present
   const verRow = db.prepare("SELECT int_val FROM cc_meta WHERE key = 'state_version'").get();
-  if (!verRow) {
+  const privCountRow = db.prepare('SELECT COUNT(*) as cnt FROM cc_user_privileges').get() as { cnt: number };
+  if (!verRow || Number(privCountRow.cnt) === 0) {
     db.exec('BEGIN IMMEDIATE;');
     try {
       db.prepare("INSERT OR IGNORE INTO cc_meta (key, int_val, text_val) VALUES ('state_version', 1, NULL)").run();
@@ -474,6 +526,21 @@ function openControlCenterDb() {
       const insAgent = db.prepare('INSERT OR IGNORE INTO cc_agents (agent_id, json_data) VALUES (?, ?)');
       for (const [aid, aobj] of Object.entries(agents)) {
         insAgent.run(aid, JSON.stringify(aobj));
+      }
+      const insPriv = db.prepare(
+        'INSERT OR IGNORE INTO cc_user_privileges (user_id, email, role, status, has_support_access, allowed_tenants_json, updated_at_utc) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      );
+      const nowIso = new Date().toISOString();
+      for (const u of INITIAL_USERS) {
+        insPriv.run(
+          u.id,
+          u.email.toLowerCase(),
+          u.role,
+          u.status,
+          u.hasSupportAccess ? 1 : 0,
+          JSON.stringify(u.allowedTenantIds || []),
+          nowIso
+        );
       }
       db.exec('COMMIT;');
     } catch (e) {
@@ -657,8 +724,9 @@ export function redactSensitiveSummary(input: string): { clean: string; hadSecre
 }
 
 /**
- * P1 Remediation: Real SuperAdmin authentication integrated with Support Hub's canonical INITIAL_USERS.
- * Verifies email + account identity/credential + active status + super_admin role before minting a server-signed session token.
+ * P1 & R19 Priority 3 Remediation: Real SuperAdmin authentication bound to server-side privilege registry
+ * (cc_user_privileges) and stateful session ledger (cc_sessions).
+ * Never trusts client-supplied email alone; requires matching server identity + active status + super_admin role.
  */
 export function authenticateSuperAdminCredentials(
   email: string,
@@ -681,27 +749,62 @@ export function authenticateSuperAdminCredentials(
 
   const normalizedEmail = String(email || '').trim().toLowerCase();
   const normalizedCred = String(userIdOrCredential || '').trim();
-  const user = INITIAL_USERS.find(
+  const baseUser = INITIAL_USERS.find(
     (u) => u.email.toLowerCase() === normalizedEmail || u.googleEmail?.toLowerCase() === normalizedEmail
   );
-  if (!user || !normalizedCred || (user.id !== normalizedCred && user.username !== normalizedCred)) {
+  if (!baseUser || !normalizedCred || (baseUser.id !== normalizedCred && baseUser.username !== normalizedCred)) {
     return { ok: false, httpStatus: 401, error: 'invalid_credentials' };
   }
-  if (user.status !== 'active' || !user.hasSupportAccess) {
-    return { ok: false, httpStatus: 403, error: 'account_inactive_or_revoked' };
-  }
-  if (user.role !== 'super_admin') {
-    return { ok: false, httpStatus: 403, error: `rbac_denied_role_${user.role}_not_super_admin` };
+
+  // Consult live server-side privilege state in SQLite (cc_user_privileges)
+  const db = openControlCenterDb();
+  let privRow:
+    | {
+        user_id: string;
+        email: string;
+        role: string;
+        status: string;
+        has_support_access: number;
+        allowed_tenants_json: string;
+      }
+    | undefined;
+  try {
+    privRow = db
+      .prepare('SELECT * FROM cc_user_privileges WHERE user_id = ?')
+      .get(baseUser.id) as any;
+  } finally {
+    db.close();
   }
 
-  const sessionToken = issueServerSessionToken(user.id, tenantId, 3600, secrets.sessionSecret);
-  const csrfToken = issueCsrfToken(sessionToken, secrets.sessionSecret);
+  const effectiveRole = (privRow?.role || baseUser.role) as UserAccount['role'];
+  const effectiveStatus = (privRow?.status || baseUser.status) as UserAccount['status'];
+  const effectiveSupportAccess = privRow ? Boolean(privRow.has_support_access) : baseUser.hasSupportAccess;
+  const effectiveAllowedTenants: string[] = privRow
+    ? JSON.parse(privRow.allowed_tenants_json || '[]')
+    : baseUser.allowedTenantIds;
+
+  if (effectiveStatus !== 'active' || !effectiveSupportAccess) {
+    return { ok: false, httpStatus: 403, error: 'account_inactive_or_revoked' };
+  }
+  if (effectiveRole !== 'super_admin') {
+    return { ok: false, httpStatus: 403, error: `rbac_denied_role_${effectiveRole}_not_super_admin` };
+  }
+
+  const sessionToken = issueServerSessionToken(baseUser.id, tenantId, 3600, secrets.sessionSecret);
+  const csrfToken = issueCsrfToken(sessionToken, secrets.csrfSecret);
+  const effectiveActor: UserAccount = {
+    ...baseUser,
+    role: effectiveRole,
+    status: effectiveStatus,
+    hasSupportAccess: effectiveSupportAccess,
+    allowedTenantIds: effectiveAllowedTenants,
+  };
   return {
     ok: true,
     httpStatus: 200,
     sessionToken,
     csrfToken,
-    actor: user,
+    actor: effectiveActor,
   };
 }
 
@@ -715,27 +818,82 @@ export function issueServerSessionToken(
   const user = INITIAL_USERS.find((u) => u.id === userId);
   if (!user) throw new Error(`Unknown user_id: ${userId}`);
   const nowSec = Math.floor(Date.now() / 1000);
+  const expSec = nowSec + ttlSec;
+  const jti = `sess-${nowSec}-${crypto.randomBytes(6).toString('hex')}`;
+
+  withTransaction((db) => {
+    db.prepare(
+      'INSERT INTO cc_sessions (session_id, user_id, tenant_id, issued_at_sec, expires_at_sec, revoked) VALUES (?, ?, ?, ?, ?, 0)'
+    ).run(jti, user.id, tenantId, nowSec, expSec);
+  });
+
   const payload = JSON.stringify({
+    jti,
     sub: user.id,
     role: user.role,
     tenant_id: tenantId,
     allowed_tenants: user.allowedTenantIds,
     status: user.status,
     iat: nowSec,
-    exp: nowSec + ttlSec,
+    exp: expSec,
   });
   const b64 = Buffer.from(payload, 'utf-8').toString('base64url');
   const sig = crypto.createHmac('sha256', secret).update(b64).digest('base64url');
   return `${b64}.${sig}`;
 }
 
+export function revokeSuperAdminSession(sessionIdOrToken: string, reason: string = 'manual_revocation'): boolean {
+  let jti = sessionIdOrToken;
+  if (sessionIdOrToken.includes('.')) {
+    try {
+      const [b64] = sessionIdOrToken.split('.');
+      const parsed = JSON.parse(Buffer.from(b64, 'base64url').toString('utf-8'));
+      if (parsed.jti) jti = String(parsed.jti);
+    } catch {
+      // treat as raw session_id
+    }
+  }
+  return withTransaction((db) => {
+    const res = db
+      .prepare('UPDATE cc_sessions SET revoked = 1, revoked_reason = ? WHERE session_id = ?')
+      .run(reason, jti);
+    return res.changes > 0;
+  });
+}
+
+export function updateControlCenterUserPrivilege(
+  userId: string,
+  updates: {
+    role?: UserAccount['role'];
+    status?: UserAccount['status'];
+    hasSupportAccess?: boolean;
+    allowedTenantIds?: string[];
+  }
+): boolean {
+  return withTransaction((db) => {
+    const current = db.prepare('SELECT * FROM cc_user_privileges WHERE user_id = ?').get(userId) as any;
+    if (!current) return false;
+    const nextRole = updates.role ?? current.role;
+    const nextStatus = updates.status ?? current.status;
+    const nextSupport =
+      updates.hasSupportAccess !== undefined ? (updates.hasSupportAccess ? 1 : 0) : Number(current.has_support_access);
+    const nextTenants = updates.allowedTenantIds
+      ? JSON.stringify(updates.allowedTenantIds)
+      : current.allowed_tenants_json;
+    db.prepare(
+      'UPDATE cc_user_privileges SET role = ?, status = ?, has_support_access = ?, allowed_tenants_json = ?, updated_at_utc = ? WHERE user_id = ?'
+    ).run(nextRole, nextStatus, nextSupport, nextTenants, new Date().toISOString(), userId);
+    return true;
+  });
+}
+
 export function issueCsrfToken(sessionToken: string, explicitSecret?: string): string {
-  const secret = explicitSecret || getRequiredSecrets().sessionSecret;
+  const secret = explicitSecret || getRequiredSecrets().csrfSecret;
   return crypto.createHmac('sha256', secret).update(`csrf:${sessionToken}`).digest('hex');
 }
 
 /**
- * Server-side RBAC + Tenant Isolation verification (R18-07 & R18-08).
+ * Server-side RBAC + Tenant Isolation + Session Revocation + Live Privilege Verification (R18-07, R18-08 & R19 Priority 3).
  */
 export function verifySuperAdminRequest(headers: Record<string, string | undefined>): {
   ok: boolean;
@@ -770,7 +928,7 @@ export function verifySuperAdminRequest(headers: Record<string, string | undefin
     return { ok: false, httpStatus: 401, error: 'invalid_session_signature' };
   }
 
-  let claims: { sub: string; role: string; tenant_id: string; exp: number };
+  let claims: { jti?: string; sub: string; role: string; tenant_id: string; exp: number };
   try {
     claims = JSON.parse(Buffer.from(b64, 'base64url').toString('utf-8'));
   } catch {
@@ -781,21 +939,56 @@ export function verifySuperAdminRequest(headers: Record<string, string | undefin
     return { ok: false, httpStatus: 401, error: 'session_expired' };
   }
 
-  const serverUser = INITIAL_USERS.find((u) => u.id === claims.sub);
-  if (!serverUser || serverUser.status !== 'active' || !serverUser.hasSupportAccess) {
+  const baseUser = INITIAL_USERS.find((u) => u.id === claims.sub);
+  if (!baseUser) {
     return { ok: false, httpStatus: 403, error: 'account_inactive_or_revoked' };
   }
 
-  if (serverUser.role !== 'super_admin') {
+  // Verify live session revocation (cc_sessions) and dynamic privilege state (cc_user_privileges)
+  const db = openControlCenterDb();
+  let sessRow: { revoked: number; revoked_reason?: string } | undefined;
+  let privRow:
+    | {
+        role: string;
+        status: string;
+        has_support_access: number;
+        allowed_tenants_json: string;
+      }
+    | undefined;
+  try {
+    if (claims.jti) {
+      sessRow = db.prepare('SELECT revoked, revoked_reason FROM cc_sessions WHERE session_id = ?').get(claims.jti) as any;
+    }
+    privRow = db.prepare('SELECT * FROM cc_user_privileges WHERE user_id = ?').get(claims.sub) as any;
+  } finally {
+    db.close();
+  }
+
+  if (claims.jti && (!sessRow || Number(sessRow.revoked) === 1)) {
+    return { ok: false, httpStatus: 401, error: 'session_revoked' };
+  }
+
+  const effectiveRole = (privRow?.role || baseUser.role) as UserAccount['role'];
+  const effectiveStatus = (privRow?.status || baseUser.status) as UserAccount['status'];
+  const effectiveSupportAccess = privRow ? Boolean(privRow.has_support_access) : baseUser.hasSupportAccess;
+  const effectiveAllowedTenants: string[] = privRow
+    ? JSON.parse(privRow.allowed_tenants_json || '[]')
+    : baseUser.allowedTenantIds;
+
+  if (effectiveStatus !== 'active' || !effectiveSupportAccess) {
+    return { ok: false, httpStatus: 403, error: 'account_inactive_or_revoked' };
+  }
+
+  if (effectiveRole !== 'super_admin') {
     return {
       ok: false,
       httpStatus: 403,
-      error: `rbac_denied_role_${serverUser.role}_not_super_admin`,
+      error: `rbac_denied_role_${effectiveRole}_not_super_admin`,
     };
   }
 
   const allowedSuperAdminTenants = new Set(['helpus-support', 'helpus-admin']);
-  if (!allowedSuperAdminTenants.has(requestedTenant) || !serverUser.allowedTenantIds.includes('all')) {
+  if (!allowedSuperAdminTenants.has(requestedTenant) || !effectiveAllowedTenants.includes('all')) {
     return {
       ok: false,
       httpStatus: 403,
@@ -803,7 +996,14 @@ export function verifySuperAdminRequest(headers: Record<string, string | undefin
     };
   }
 
-  return { ok: true, httpStatus: 200, actor: serverUser, tenantId: requestedTenant };
+  const effectiveActor: UserAccount = {
+    ...baseUser,
+    role: effectiveRole,
+    status: effectiveStatus,
+    hasSupportAccess: effectiveSupportAccess,
+    allowedTenantIds: effectiveAllowedTenants,
+  };
+  return { ok: true, httpStatus: 200, actor: effectiveActor, tenantId: requestedTenant };
 }
 
 /**
@@ -1061,6 +1261,10 @@ export function ingestEventBatch(
       acceptedEventIds.push(ev.event_id);
       accepted += 1;
 
+      if (process.env.HELPUSDEV_CC_SIMULATE_MID_TX_CRASH === '1') {
+        throw new Error('simulated_power_loss_mid_transaction');
+      }
+
       const agentRow = db.prepare('SELECT json_data FROM cc_agents WHERE agent_id = ?').get(ev.agent) as
         | { json_data: string }
         | undefined;
@@ -1173,7 +1377,7 @@ export function submitAdminIntent(params: {
     const expiresIso = new Date(Date.now() + ttlMs).toISOString();
     const intentId = `intent-r18-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
     const sigPayload = `${intentId}|${params.actor.id}|${params.host_id}|${params.workspace_id}|${params.target_id}|${params.verb}|${params.expected_state_version}|${params.nonce}`;
-    const signature = crypto.createHmac('sha256', secrets.deviceSecretPrimary).update(sigPayload).digest('hex');
+    const signature = crypto.createHmac('sha256', secrets.intentSigningSecret).update(sigPayload).digest('hex');
 
     const intent: HelpUSDevIntentV1 = {
       schema: 'helpusdev.intent.v1',

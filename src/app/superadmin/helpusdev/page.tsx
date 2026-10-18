@@ -69,17 +69,22 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
   const [intentFeedback, setIntentFeedback] = useState<string>('');
   const [submittingVerb, setSubmittingVerb] = useState<string | null>(null);
 
+    const [artifacts, setArtifacts] = useState<any[]>([]);
+  const [patches, setPatches] = useState<any[]>([]);
+  const [locks, setLocks] = useState<any[]>([]);
+
   const fetchDashboardEndpoints = useCallback(async (bearer: string) => {
     setErrorMsg('');
     const headers = {
       Authorization: `Bearer ${bearer}`,
       'X-HelpUS-Tenant-Id': 'helpus-support',
     };
-    const [ovRes, tkRes, evRes, agRes] = await Promise.all([
+    const [ovRes, tkRes, evRes, agRes, artRes] = await Promise.all([
       fetch('/api/superadmin/helpusdev/overview', { headers, cache: 'no-store' }),
       fetch('/api/superadmin/helpusdev/tasks?limit=30', { headers, cache: 'no-store' }),
       fetch('/api/superadmin/helpusdev/events?limit=40', { headers, cache: 'no-store' }),
       fetch('/api/superadmin/helpusdev/agents', { headers, cache: 'no-store' }),
+      fetch('/api/superadmin/helpusdev/artifacts', { headers, cache: 'no-store' }).catch(() => null),
     ]);
 
     if (!ovRes.ok) {
@@ -87,11 +92,12 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
       throw new Error(errBody.error || `HTTP ${ovRes.status} ao consultar overview`);
     }
 
-    const [ovJson, tkJson, evJson, agJson] = await Promise.all([
+    const [ovJson, tkJson, evJson, agJson, artJson] = await Promise.all([
       ovRes.json(),
       tkRes.json(),
       evRes.json(),
       agRes.json(),
+      artRes && artRes.ok ? artRes.json() : Promise.resolve({ artifacts: [], patches: [], locks: [] }),
     ]);
 
     setOverview(ovJson);
@@ -99,6 +105,9 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
     setEvents(Array.isArray(evJson.items) ? evJson.items : []);
     setAgents(Array.isArray(agJson.agents) ? agJson.agents : []);
     setIntents(Array.isArray(ovJson.recent_intents) ? ovJson.recent_intents : []);
+    setArtifacts(Array.isArray(artJson?.artifacts) ? artJson.artifacts : []);
+    setPatches(Array.isArray(artJson?.patches) ? artJson.patches : []);
+    setLocks(Array.isArray(artJson?.locks) ? artJson.locks : []);
   }, []);
 
   const initializeAndLoad = useCallback(async () => {
@@ -428,6 +437,77 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
           </div>
         </section>
       </div>
+
+      {/* Central de Arquivos CAS & Smart Patch Engine (R21) */}
+      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <div>
+            <h2 className="text-sm font-bold text-sky-300">
+              Central de Arquivos CAS &amp; Smart Patch Engine (HelpUSDev R21)
+            </h2>
+            <p className="text-xs text-slate-400">
+              Repositório soberano de artefatos por SHA-256 e alterações parciais atômicas com verificação Compare-And-Swap (CAS).
+            </p>
+          </div>
+          <div className="flex gap-4 text-xs font-mono">
+            <span className="text-slate-400">Artefatos CAS: <strong className="text-emerald-300">{artifacts.length}</strong></span>
+            <span className="text-slate-400">Patches Aplicados: <strong className="text-indigo-300">{patches.length}</strong></span>
+            <span className="text-slate-400">Travas Ativas: <strong className="text-amber-300">{locks.length}</strong></span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+          {/* Coluna 1: Artefatos CAS */}
+          <div className="space-y-2">
+            <h3 className="font-semibold text-slate-300">Artefatos Armazenados por Hash (CAS)</h3>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {artifacts.length === 0 ? (
+                <div className="text-slate-500 italic p-3 bg-slate-950/40 rounded-lg">Nenhum artefato armazenado no momento.</div>
+              ) : (
+                artifacts.map((art: any) => (
+                  <div key={art.artifact_ref} className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 font-mono text-[11px] space-y-1">
+                    <div className="flex justify-between items-center text-sky-300 font-semibold">
+                      <span>{art.filename || art.artifact_ref.slice(0, 20) + '...'}</span>
+                      <span className="text-slate-400 text-[10px]">{art.size_bytes} bytes</span>
+                    </div>
+                    <div className="text-slate-400 truncate">{art.artifact_ref}</div>
+                    <div className="flex justify-between text-[10px] text-slate-500">
+                      <span>Projeto: {art.project} | Agente: {art.agent}</span>
+                      <span>{art.created_at_utc?.slice(0, 19)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Coluna 2: Histórico de Smart Patches */}
+          <div className="space-y-2">
+            <h3 className="font-semibold text-slate-300">Histórico de Smart Patches com CAS</h3>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {patches.length === 0 ? (
+                <div className="text-slate-500 italic p-3 bg-slate-950/40 rounded-lg">Nenhum patch aplicado recentemente.</div>
+              ) : (
+                patches.map((pt: any) => (
+                  <div key={pt.patch_id} className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 text-[11px] space-y-1">
+                    <div className="flex justify-between font-mono font-semibold">
+                      <span className="text-slate-200">{pt.patch_id}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${pt.status === 'applied' ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-300'}`}>
+                        {pt.status.toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="text-slate-400 font-mono text-[10px] truncate">{pt.file_path}</div>
+                    <div className="text-[10px] text-slate-500 flex justify-between font-mono">
+                      <span>CAS: {pt.expected_sha256?.slice(0, 8)}... → {pt.resulting_sha256?.slice(0, 8)}...</span>
+                      <span>{pt.applied_at_utc?.slice(0, 19)}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

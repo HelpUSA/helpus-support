@@ -9,18 +9,19 @@ import path from 'path';
 import { INITIAL_USERS, UserAccount } from './auth';
 
 // Built-in Node.js 22+/24+ synchronous SQLite driver with WAL & BEGIN IMMEDIATE support
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { DatabaseSync } = require('node:sqlite') as {
-  DatabaseSync: new (location: string) => {
-    exec: (sql: string) => void;
-    prepare: (sql: string) => {
-      get: (...params: any[]) => any;
-      all: (...params: any[]) => any[];
-      run: (...params: any[]) => { changes: number; lastInsertRowid: number | bigint };
-    };
-    close: () => void;
-  };
-};
+// Lazy-loaded to avoid serverless build crashes on runtimes without node:sqlite
+let _DatabaseSyncClass: any = null;
+export function getDatabaseSync() {
+  if (!_DatabaseSyncClass) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      _DatabaseSyncClass = require('node:sqlite').DatabaseSync;
+    } catch (e: any) {
+      throw new ControlCenterStorageIntegrityError(`node:sqlite is unavailable in this environment: ${e?.message || e}`);
+    }
+  }
+  return _DatabaseSyncClass;
+}
 
 export type CanonicalTaskState =
   | 'created'
@@ -378,7 +379,7 @@ function defaultAgentsMap(): Record<string, HelpUSDevAgentStatus> {
  * Fails closed if executed in an ephemeral Vercel serverless environment without a shared remote transactional DB URL,
  * and fails closed on file corruption (never silently recreates empty state).
  */
-function openControlCenterDb() {
+export function openControlCenterDb() {
   const isServerless =
     process.env.VERCEL === '1' || process.env.HELPUSDEV_CC_SIMULATE_VERCEL_SERVERLESS === '1';
   const hasRemoteSharedDb = Boolean(
@@ -405,8 +406,9 @@ function openControlCenterDb() {
     }
   }
 
-  let db: ReturnType<typeof DatabaseSync.prototype.constructor>;
+  let db: any;
   try {
+    const DatabaseSync = getDatabaseSync();
     db = new DatabaseSync(dbPath);
     db.exec('PRAGMA journal_mode = WAL;');
     db.exec('PRAGMA synchronous = FULL;');

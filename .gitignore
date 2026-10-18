@@ -14,3 +14,6 @@ open_window_titles.txt
 .env*.local
 *.env*
 *.backup
+
+# HelpUSDev Control Center Local Transactional Store
+.helpusdev_control_center*

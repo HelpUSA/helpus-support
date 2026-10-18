@@ -1,6 +1,10 @@
 import fs from 'fs';
+import path from 'path';
 import {
   resetControlCenterStateForTests,
+  closeControlCenterDb,
+  ControlCenterStorageIntegrityError,
+  authenticateSuperAdminCredentials,
   issueServerSessionToken,
   issueCsrfToken,
   verifySuperAdminRequest,
@@ -54,6 +58,37 @@ function runVerification() {
   if (process.argv[2] === '--ingest-batch' && process.argv[3]) {
     runBatchIngestMode(process.argv[3]);
     return;
+  }
+
+  // Test P0: Missing secrets fail-closed (HTTP 503, zero fallback defaults)
+  process.env.HELPUSDEV_CC_FORCE_MISSING_SECRETS = '1';
+  const missingSecretSessionRes = authenticateSuperAdminCredentials('wmsj.portal@gmail.com', '123456', 'helpus-support');
+  const missingSecretAdminVerify = verifySuperAdminRequest({ authorization: 'Bearer test', 'x-helpus-tenant-id': 'helpus-support' });
+  const missingSecretDeviceVerify = verifyDeviceRequest({}, '{}');
+  delete process.env.HELPUSDEV_CC_FORCE_MISSING_SECRETS;
+
+  // Test P1: Corrupted SQLite file fail-closed (never silently reset state)
+  const corruptDbPath = path.join(process.cwd(), '.helpusdev_cc_corrupt_test.sqlite');
+  fs.writeFileSync(corruptDbPath, 'CORRUPTED_HEADER_NOT_SQLITE_FORMAT_3_DATA_000000000', 'utf-8');
+  process.env.HELPUSDEV_CC_SQLITE_PATH = corruptDbPath;
+  closeControlCenterDb();
+  let corruptionFailedClosed = false;
+  let corruptionErrorCode = '';
+  try {
+    loadControlCenterState();
+  } catch (err: any) {
+    if (err instanceof ControlCenterStorageIntegrityError || err?.name === 'ControlCenterStorageIntegrityError') {
+      corruptionFailedClosed = true;
+      corruptionErrorCode = err.code || 'storage_integrity_error';
+    }
+  } finally {
+    closeControlCenterDb();
+    delete process.env.HELPUSDEV_CC_SQLITE_PATH;
+    try {
+      if (fs.existsSync(corruptDbPath)) fs.unlinkSync(corruptDbPath);
+    } catch {
+      // ignore cleanup error
+    }
   }
 
   resetControlCenterStateForTests();
@@ -186,11 +221,35 @@ function runVerification() {
   const ingestReplayRes = ingestEventBatch(batchId, batchEventsWithDup, exportedBatch?.tasks || []);
   const countAfterReplay = loadControlCenterState().events.length;
 
+  // Test P2: Reconcile the out-of-order missing sequence (maxSeq + 1) for (hostId, workspaceId)
+  const missingGapEvent: HelpUSDevEventV1 = {
+    schema: 'helpusdev.event.v1',
+    event_id: `ev-r18-gap-fill-${maxSeq + 1}`,
+    host_id: hostId,
+    workspace_id: workspaceId,
+    seq: maxSeq + 1,
+    workflow_id: 'helpusdev_r18_workflow',
+    task_id: 'R18-GAP-FILL',
+    correlation_id: 'R18-GAP-FILL',
+    event_type: 'task.started',
+    occurred_at_utc: '2026-10-18T19:14:30.000Z',
+    observed_at_utc: new Date().toISOString(),
+    agent: 'antigravity',
+    status: 'running',
+    summary_redacted: 'Out-of-order sequence event arrived to reconcile gap',
+    attempt_no: 1,
+  };
+  const gapReconcileRes = ingestEventBatch(`${batchId}-gap-fill`, [missingGapEvent]);
+
   // 4. R18-03 After Sync & Stale Simulation (>1h later)
   const overviewFresh = getControlCenterOverview(Date.now(), 120);
   const overviewStaleAfter1h = getControlCenterOverview(Date.now() + 3700_000, 120);
 
-  // 5. R18-07 & Priority 2: RBAC verification (unauthenticated, expired token, client_admin, super_admin)
+  // 5. R18-07 & P1 Real SuperAdmin Authentication + RBAC verification
+  const realAuthSuccess = authenticateSuperAdminCredentials('wagner.redes@gmail.com', 'usr-wagner', 'helpus-support');
+  const realAuthClientForbidden = authenticateSuperAdminCredentials('eduardojcmagalhaes@gmail.com', 'usr-eduardo', 'helpus-support');
+  const realAuthWrongPass = authenticateSuperAdminCredentials('wagner.redes@gmail.com', 'wrong-cred', 'helpus-support');
+
   const unauthCheck = verifySuperAdminRequest({});
   const expiredSessionToken = issueServerSessionToken('usr-wagner', 'helpus-support', -60);
   const expiredSessionCheck = verifySuperAdminRequest({
@@ -202,7 +261,7 @@ function runVerification() {
     authorization: `Bearer ${clientToken}`,
     'x-helpus-tenant-id': 'helpus-support',
   });
-  const superAdminToken = issueServerSessionToken('usr-wagner', 'helpus-support');
+  const superAdminToken = realAuthSuccess.sessionToken!;
   const superAdminCheck = verifySuperAdminRequest({
     authorization: `Bearer ${superAdminToken}`,
     'x-helpus-tenant-id': 'helpus-support',
@@ -301,7 +360,8 @@ function runVerification() {
     Date.now() + 10_000
   );
 
-  // Priority 1 & 7: Cold reload from disk (simulating Next.js instance restart) and verify separation of delivery_acked vs model_reply_observed
+  // Priority 1 & 7: Cold reload from SQLite (simulating Next.js instance restart) and verify separation of delivery_acked vs model_reply_observed
+  closeControlCenterDb();
   const reloadedState = loadControlCenterState();
   const geminiRec = reloadedState.agents['gemini'];
   const separationHonest =
@@ -310,6 +370,25 @@ function runVerification() {
     geminiRec.last_output_validated_utc === null;
 
   const output = {
+    R18_P0_SECRETS: {
+      pass:
+        missingSecretSessionRes.httpStatus === 503 &&
+        missingSecretAdminVerify.httpStatus === 503 &&
+        missingSecretDeviceVerify.httpStatus === 503,
+      missing_secret_session_status: missingSecretSessionRes.httpStatus,
+      missing_secret_admin_status: missingSecretAdminVerify.httpStatus,
+      missing_secret_device_status: missingSecretDeviceVerify.httpStatus,
+    },
+    R18_P1_CORRUPTION_FAIL_CLOSED: {
+      pass: corruptionFailedClosed === true,
+      failed_closed_on_corrupt_sqlite: corruptionFailedClosed,
+      error_code: corruptionErrorCode,
+    },
+    R18_P2_SEQ_RECONCILIATION: {
+      pass: ingestRes1.seq_gaps_detected >= 1 && (gapReconcileRes.seq_gaps_reconciled || 0) >= 1,
+      gaps_detected_on_out_of_order: ingestRes1.seq_gaps_detected,
+      gaps_reconciled_on_missing_seq_arrival: gapReconcileRes.seq_gaps_reconciled,
+    },
     R18_03: {
       pass: staleBeforeSync === true && overviewFresh.is_stale === false && overviewStaleAfter1h.is_stale === true,
       stale_before_sync: staleBeforeSync,
@@ -341,10 +420,16 @@ function runVerification() {
     },
     R18_07: {
       pass:
+        realAuthSuccess.httpStatus === 200 &&
+        realAuthClientForbidden.httpStatus === 403 &&
+        realAuthWrongPass.httpStatus === 401 &&
         unauthCheck.httpStatus === 401 &&
         expiredSessionCheck.httpStatus === 401 &&
         clientCheck.httpStatus === 403 &&
         superAdminCheck.httpStatus === 200,
+      real_auth_superadmin_status: realAuthSuccess.httpStatus,
+      real_auth_client_status: realAuthClientForbidden.httpStatus,
+      real_auth_wrong_password_status: realAuthWrongPass.httpStatus,
       unauthenticated_status: unauthCheck.httpStatus,
       expired_session_status: expiredSessionCheck.httpStatus,
       expired_session_error: expiredSessionCheck.error,

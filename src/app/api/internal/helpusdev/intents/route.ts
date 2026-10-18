@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   loadControlCenterState,
-  saveControlCenterState,
   verifyDeviceRequest,
 } from '@/lib/helpusdevControlCenter';
 
@@ -11,13 +10,12 @@ export async function GET(req: NextRequest) {
     headersObj[k.toLowerCase()] = v;
   });
 
-  const state = loadControlCenterState();
-  const devAuth = verifyDeviceRequest(headersObj, '', state);
+  const devAuth = verifyDeviceRequest(headersObj, '');
   if (!devAuth.ok) {
     return NextResponse.json({ ok: false, error: devAuth.error }, { status: devAuth.httpStatus });
   }
 
-  saveControlCenterState(state);
+  const state = loadControlCenterState();
   const pending = state.intents.filter(
     (i) => i.status === 'submitted' && i.host_id === devAuth.hostId
   );

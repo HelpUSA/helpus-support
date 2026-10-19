@@ -17,3 +17,6 @@ open_window_titles.txt
 
 # HelpUSDev Control Center Local Transactional Store
 .helpusdev_control_center*
+*.bak
+*.tsbuildinfo
+portal_live_test.png

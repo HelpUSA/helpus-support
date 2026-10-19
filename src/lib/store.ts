@@ -287,10 +287,9 @@ export const INITIAL_TICKETS: Ticket[] = [
   }
 ];
 
-const DEFAULT_GH_TOKEN = ['gho_', 'wLjlZ6KLwTO', 'p1Kv2UB9L5lm', 'reeFQ6g2JpLgx'].join('');
-const GITHUB_TOKEN = DEFAULT_GH_TOKEN;
-const DB_REPO = 'HelpUSA/publicarte';
-const DB_PATH = 'data/helpus_tickets.json';
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
+const DB_REPO = process.env.GITHUB_DB_REPO || 'HelpUSA/publicarte';
+const DB_PATH = process.env.GITHUB_DB_PATH || 'data/helpus_tickets.json';
 
 let cloudSha: string | null = null;
 
@@ -411,7 +410,7 @@ async function saveGitHubTickets(tickets: Ticket[]): Promise<{ success: boolean;
   }
 }
 
-class TicketStore {
+export class TicketStore {
   private tickets: Ticket[] = INITIAL_TICKETS;
   private tenants: Tenant[] = INITIAL_TENANTS;
 
@@ -510,7 +509,7 @@ class TicketStore {
         try {
           const content = fs.readFileSync(filePath, 'utf-8');
           const parsed = JSON.parse(content);
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          if (Array.isArray(parsed)) {
             this.tickets = parsed;
             loaded = true;
           }
@@ -524,7 +523,7 @@ class TicketStore {
         try {
           const bakContent = fs.readFileSync(backupPath, 'utf-8');
           const parsedBak = JSON.parse(bakContent);
-          if (Array.isArray(parsedBak) && parsedBak.length > 0) {
+          if (Array.isArray(parsedBak)) {
             this.tickets = parsedBak;
             console.log('[Persistence] Chamados restaurados com sucesso a partir do backup:', backupPath);
             loaded = true;

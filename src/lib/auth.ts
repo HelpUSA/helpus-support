@@ -1,4 +1,22 @@
-export type UserRole = 'super_admin' | 'admin' | 'agent' | 'client_admin' | 'client_user';
+import {
+  signSessionToken,
+  verifySessionToken,
+  validateServerApiAccess,
+  projectTicketForUser,
+  projectTicketListForUser,
+  AUTHORIZED_SUPERADMIN_EMAILS,
+  UserRole,
+} from './serverAuth';
+
+export {
+  signSessionToken,
+  verifySessionToken,
+  validateServerApiAccess,
+  projectTicketForUser,
+  projectTicketListForUser,
+  AUTHORIZED_SUPERADMIN_EMAILS,
+};
+export type { UserRole };
 
 export interface UserAccount {
   id: string;
@@ -28,7 +46,13 @@ export const INITIAL_USERS: UserAccount[] = [
     hasSupportAccess: true,
     allowedTenantIds: ['all'],
     status: 'active',
-    sessionToken: 'session_superadmin_master_tok_32char_verified_001',
+    sessionToken: signSessionToken({
+      userId: 'usr-helpus-master',
+      email: 'helpus.ecommerce@gmail.com',
+      role: 'super_admin',
+      tenantId: 'all',
+      allowedTenantIds: ['all'],
+    }),
   },
   {
     id: 'usr-wagner',
@@ -41,7 +65,13 @@ export const INITIAL_USERS: UserAccount[] = [
     hasSupportAccess: true,
     allowedTenantIds: ['all'],
     status: 'active',
-    sessionToken: 'session_superadmin_wagner_tok_32char_verified_002',
+    sessionToken: signSessionToken({
+      userId: 'usr-wagner',
+      email: 'wagner.redes@gmail.com',
+      role: 'super_admin',
+      tenantId: 'all',
+      allowedTenantIds: ['all'],
+    }),
   },
   {
     id: 'usr-eduardo',
@@ -56,6 +86,13 @@ export const INITIAL_USERS: UserAccount[] = [
     hasSupportAccess: true,
     allowedTenantIds: ['neuro.eduardomagalhaes', 'helpus-support', 'helpus-post'],
     status: 'active',
+    sessionToken: signSessionToken({
+      userId: 'usr-eduardo',
+      email: 'eduardojcmagalhaes@gmail.com',
+      role: 'client_admin',
+      tenantId: 'neuro.eduardomagalhaes',
+      allowedTenantIds: ['neuro.eduardomagalhaes', 'helpus-support', 'helpus-post'],
+    }),
   },
   {
     id: 'usr-tercio',
@@ -70,6 +107,13 @@ export const INITIAL_USERS: UserAccount[] = [
     hasSupportAccess: true,
     allowedTenantIds: ['publicarte'],
     status: 'active',
+    sessionToken: signSessionToken({
+      userId: 'usr-tercio',
+      email: 'publicarte09@gmail.com',
+      role: 'client_admin',
+      tenantId: 'publicarte',
+      allowedTenantIds: ['publicarte'],
+    }),
   },
   {
     id: 'usr-kaline',
@@ -84,6 +128,13 @@ export const INITIAL_USERS: UserAccount[] = [
     hasSupportAccess: true,
     allowedTenantIds: ['kaline-modas'],
     status: 'active',
+    sessionToken: signSessionToken({
+      userId: 'usr-kaline',
+      email: 'augustokaline3@gmail.com',
+      role: 'client_admin',
+      tenantId: 'kaline-modas',
+      allowedTenantIds: ['kaline-modas'],
+    }),
   },
   {
     id: 'usr-maryana',
@@ -98,6 +149,13 @@ export const INITIAL_USERS: UserAccount[] = [
     hasSupportAccess: true,
     allowedTenantIds: ['usmle'],
     status: 'active',
+    sessionToken: signSessionToken({
+      userId: 'usr-maryana',
+      email: 'marychavesmcp@gmail.com',
+      role: 'client_admin',
+      tenantId: 'usmle',
+      allowedTenantIds: ['usmle'],
+    }),
   },
   {
     id: 'usr-naldo',
@@ -112,13 +170,15 @@ export const INITIAL_USERS: UserAccount[] = [
     hasSupportAccess: true,
     allowedTenantIds: ['studionaldohair'],
     status: 'active',
+    sessionToken: signSessionToken({
+      userId: 'usr-naldo',
+      email: 'elinaldogoncalves1979@gmail.com',
+      role: 'client_admin',
+      tenantId: 'studionaldohair',
+      allowedTenantIds: ['studionaldohair'],
+    }),
   },
 ];
-
-export const AUTHORIZED_SUPERADMIN_EMAILS = [
-  'helpus.ecommerce@gmail.com',
-  'wagner.redes@gmail.com',
-] as const;
 
 export const AUTHORIZED_SUPERADMIN_IDS = [
   'usr-helpus-master',
@@ -132,83 +192,6 @@ export function isAuthorizedSuperAdmin(user?: Partial<UserAccount> | null): bool
   const isSuperAdminEmail = (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).includes(cleanEmail);
   const isSuperAdminId = user.id ? (AUTHORIZED_SUPERADMIN_IDS as readonly string[]).includes(user.id) : true;
   return cleanRole === 'super_admin' && isSuperAdminEmail && isSuperAdminId && user.status !== 'suspended';
-}
-
-export interface ServerAuthDecision {
-  authenticated: boolean;
-  isSuperAdmin: boolean;
-  userEmail?: string;
-  userId?: string;
-  tenantId?: string;
-  allowedTenantIds?: string[];
-  error?: string;
-}
-
-export function validateServerApiAccess(headers: { get(name: string): string | null }): ServerAuthDecision {
-  const authHeader = headers.get('authorization') || headers.get('Authorization') || '';
-  const superAdminSecret = headers.get('x-superadmin-secret') || '';
-  const emailHeader = (headers.get('x-user-email') || '').toLowerCase().trim();
-  const roleHeader = headers.get('x-user-role') || '';
-  const tenantHeader = headers.get('x-tenant-id') || '';
-
-  const isSuperAdminEmail = (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).includes(emailHeader);
-
-  // 1. Proof-Based SuperAdmin Authentication:
-  // Requires EITHER a valid Bearer token OR verified server secret.
-  // NEVER trusts raw headers (x-user-email / x-user-role) alone.
-  const hasValidBearer = authHeader.startsWith('Bearer ') && authHeader.slice(7).trim().length >= 32;
-  const hasValidSecret = Boolean(
-    superAdminSecret &&
-    ((process.env.SUPERADMIN_SECRET && superAdminSecret === process.env.SUPERADMIN_SECRET) ||
-     superAdminSecret === 'helpus_dev_master_authorized_local_token_v1')
-  );
-
-  if (isSuperAdminEmail && roleHeader === 'super_admin') {
-    if (hasValidBearer || hasValidSecret) {
-      return {
-        authenticated: true,
-        isSuperAdmin: true,
-        userEmail: emailHeader,
-        tenantId: 'all',
-        allowedTenantIds: ['all'],
-      };
-    }
-    // Rejected: Spoofed or unverified SuperAdmin attempt without cryptographic proof
-    return {
-      authenticated: false,
-      isSuperAdmin: false,
-      userEmail: emailHeader,
-      error: 'unverified_superadmin_credentials_missing_signed_token_or_secret',
-    };
-  }
-
-  // 2. Client User Authentication (Restricted to their own tenant):
-  if (emailHeader) {
-    const knownUser = INITIAL_USERS.find((u) => u.email.toLowerCase() === emailHeader);
-    if (knownUser && knownUser.status !== 'suspended') {
-      return {
-        authenticated: true,
-        isSuperAdmin: false, // Client users NEVER get isSuperAdmin without verified token
-        userEmail: knownUser.email,
-        userId: knownUser.id,
-        tenantId: knownUser.tenantId || tenantHeader,
-        allowedTenantIds: knownUser.allowedTenantIds,
-      };
-    }
-    return {
-      authenticated: true,
-      isSuperAdmin: false,
-      userEmail: emailHeader,
-      tenantId: tenantHeader || 'publicarte',
-      allowedTenantIds: [tenantHeader || 'publicarte'],
-    };
-  }
-
-  return {
-    authenticated: false,
-    isSuperAdmin: false,
-    error: 'unauthenticated_missing_user_headers',
-  };
 }
 
 const AUTH_STORAGE_KEY = 'helpus_auth_user_v2';
@@ -322,14 +305,26 @@ export class AuthService {
         allowedTenantIds: [userTenantId],
         status: 'active',
       };
-      if (!userAccount.sessionToken) {
-        userAccount.sessionToken = `session_${userAccount.id}_${Math.random().toString(36).substring(2)}_${Date.now()}_verified_token`;
+      if (!userAccount.sessionToken || !verifySessionToken(userAccount.sessionToken)) {
+        userAccount.sessionToken = signSessionToken({
+          userId: userAccount.id,
+          email: userAccount.email,
+          role: userAccount.role,
+          tenantId: userAccount.tenantId || 'publicarte',
+          allowedTenantIds: userAccount.allowedTenantIds || [userAccount.tenantId || 'publicarte'],
+        });
       }
       AuthService.updateUser(userAccount);
     }
 
-    if (userAccount && !userAccount.sessionToken) {
-      userAccount.sessionToken = `session_${userAccount.id}_${Math.random().toString(36).substring(2)}_${Date.now()}_verified_token`;
+    if (userAccount && (!userAccount.sessionToken || !verifySessionToken(userAccount.sessionToken))) {
+      userAccount.sessionToken = signSessionToken({
+        userId: userAccount.id,
+        email: userAccount.email,
+        role: userAccount.role,
+        tenantId: userAccount.tenantId || 'publicarte',
+        allowedTenantIds: userAccount.allowedTenantIds || [userAccount.tenantId || 'publicarte'],
+      });
     }
 
     if (typeof window !== 'undefined') {
@@ -357,8 +352,14 @@ export class AuthService {
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(parsed));
       }
 
-      if (!parsed.sessionToken) {
-        parsed.sessionToken = `session_${parsed.id}_${Math.random().toString(36).substring(2)}_${Date.now()}_verified_token`;
+      if (!parsed.sessionToken || !verifySessionToken(parsed.sessionToken)) {
+        parsed.sessionToken = signSessionToken({
+          userId: parsed.id,
+          email: parsed.email,
+          role: parsed.role,
+          tenantId: parsed.tenantId || 'publicarte',
+          allowedTenantIds: parsed.allowedTenantIds || [parsed.tenantId || 'publicarte'],
+        });
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(parsed));
       }
 
@@ -373,18 +374,8 @@ export class AuthService {
       'Content-Type': 'application/json',
     };
     const user = AuthService.getCurrentUser();
-    if (user) {
-      headers['x-user-id'] = user.id;
-      headers['x-user-email'] = user.email;
-      headers['x-user-role'] = user.role;
-      if (user.tenantId) {
-        headers['x-tenant-id'] = user.tenantId;
-      }
-      if (user.sessionToken) {
-        headers['Authorization'] = `Bearer ${user.sessionToken}`;
-      } else {
-        headers['Authorization'] = `Bearer session_${user.id}_${Date.now()}_fallback_tok_32char`;
-      }
+    if (user && user.sessionToken) {
+      headers['Authorization'] = `Bearer ${user.sessionToken}`;
     }
     return headers;
   }

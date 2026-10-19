@@ -2,7 +2,8 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { ticketStore } from '@/lib/store';
 import { aiAutoCodingWorker } from '@/lib/aiWorker';
 import { getAutoResolutionDetails } from '@/lib/aiResolver';
-import { validateServerApiAccess, AUTHORIZED_SUPERADMIN_EMAILS } from '@/lib/auth';
+import { validateServerApiAccess, projectTicketForUser } from '@/lib/serverAuth';
+import { AUTHORIZED_SUPERADMIN_EMAILS } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -10,7 +11,7 @@ export const revalidate = 0;
 const ANTI_CACHE_HEADERS = {
   'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, private',
   'Pragma': 'no-cache',
-  'Vary': 'Authorization, x-user-email, x-tenant-id, x-user-role',
+  'Vary': 'Authorization, Cookie',
 };
 
 export async function GET(
@@ -46,7 +47,10 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({ success: true, data: ticket }, { status: 200, headers: ANTI_CACHE_HEADERS });
+  return NextResponse.json(
+    { success: true, data: projectTicketForUser(ticket, auth.isSuperAdmin) },
+    { status: 200, headers: ANTI_CACHE_HEADERS }
+  );
 }
 
 export async function PATCH(
@@ -75,12 +79,18 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
     }
 
-    // 2. Verificação de permissões do caller
-    const callerEmail = (body.agentEmail || body.userEmail || auth.userEmail || '').toLowerCase().trim();
-    const isSuperAdminCaller = (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).includes(callerEmail) && 
-                               (auth.isSuperAdmin || (body.secretToken && (body.secretToken === process.env.SUPERADMIN_SECRET || body.secretToken === 'helpus_dev_master_authorized_local_token_v1')));
+    // 2. Verificação autoritativa de permissões do caller (Strict Server-Side Auth)
+    // Apenas SuperAdmins comprovados via token assinado ou secret seguro têm privilégios administrativos.
+    // Nenhum segredo fixo no body JSON é aceito.
+    const isSuperAdminCaller = auth.isSuperAdmin;
 
     if (body.action === 'progress') {
+      if (!isSuperAdminCaller) {
+        return NextResponse.json(
+          { success: false, error: 'Operação negada: Apenas o Administrador SuperAdmin pode atualizar o progresso de execução.' },
+          { status: 403, headers: ANTI_CACHE_HEADERS }
+        );
+      }
       const updated = await ticketStore.updateTicketProgress(
         id,
         Number(body.percentage || 0),
@@ -89,7 +99,7 @@ export async function PATCH(
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'reset') {
@@ -103,17 +113,16 @@ export async function PATCH(
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'approve') {
       // Strict Server-Side Permission Check:
-      // Only authenticated Master SuperAdmin with matching verified email can approve tickets.
-      // Eliminates insecure name defaults and '!agentName.includes("Eduardo")' bypass.
+      // Only authenticated Master SuperAdmin with matching verified token can approve tickets.
       if (!isSuperAdminCaller) {
         return NextResponse.json(
           { success: false, error: 'Aprovação negada: Apenas o Administrador Master HelpUS autenticado pode autorizar chamados.' },
-          { status: 403 }
+          { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
 
@@ -124,17 +133,18 @@ export async function PATCH(
         body.ticketData
       );
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
 
-      return NextResponse.json({ success: true, data: updated, cloudSaveResult });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin), cloudSaveResult }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'complete' || body.action === 'resolve') {
-      if (!isSuperAdminCaller && !auth.authenticated) {
+      const isAuthorizedOperator = isSuperAdminCaller || auth.isSuperAdmin || auth.userRole === 'agent';
+      if (!isAuthorizedOperator) {
         return NextResponse.json(
-          { success: false, error: 'Operação negada: Permissão de agente ou SuperAdmin necessária para concluir chamados.' },
-          { status: 403 }
+          { success: false, error: 'Operação negada: Permissão de operador ou SuperAdmin necessária para concluir/resolver chamados.' },
+          { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
       const updated = await ticketStore.completeTicketProductionAsync(id, {
@@ -142,20 +152,20 @@ export async function PATCH(
         solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
       });
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'reject') {
       if (!isSuperAdminCaller) {
         return NextResponse.json(
           { success: false, error: 'Operação negada: Apenas o Administrador Master HelpUS pode recusar chamados.' },
-          { status: 403 }
+          { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
       if (!body.rejectionReason) {
-        return NextResponse.json({ success: false, error: 'Motivo da recusa é obrigatório' }, { status: 400 });
+        return NextResponse.json({ success: false, error: 'Motivo da recusa é obrigatório' }, { status: 400, headers: ANTI_CACHE_HEADERS });
       }
       const updated = await ticketStore.rejectTicketAsync(
         id,
@@ -164,9 +174,9 @@ export async function PATCH(
         body.ticketData
       );
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'edit') {
@@ -202,7 +212,7 @@ export async function PATCH(
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'cancel') {
@@ -237,7 +247,7 @@ export async function PATCH(
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'close') {
@@ -262,7 +272,7 @@ export async function PATCH(
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'reopen') {
@@ -287,7 +297,7 @@ export async function PATCH(
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.status) {
@@ -301,7 +311,7 @@ export async function PATCH(
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     return NextResponse.json({ success: false, error: 'Ação não especificada ou inválida' }, { status: 400, headers: ANTI_CACHE_HEADERS });
@@ -350,11 +360,17 @@ export async function POST(
       );
     }
 
+    // TICK-01: Papel e nota interna determinados autoritativamente pelo servidor
+    const senderRole = auth.isSuperAdmin
+      ? (body.senderRole === 'system' ? 'system' : 'agent')
+      : 'client';
+    const isInternalNote = Boolean(body.isInternalNote && auth.isSuperAdmin);
+
     const message = await ticketStore.addMessageAsync(id, {
-      senderId: body.senderId || auth.userEmail || 'client',
-      senderName: body.senderName || (auth.userEmail ? auth.userEmail.split('@')[0] : body.senderId),
-      senderRole: body.senderRole || (auth.isSuperAdmin ? 'agent' : 'client'),
-      isInternalNote: Boolean(body.isInternalNote && auth.isSuperAdmin),
+      senderId: auth.userEmail || auth.userId || 'client',
+      senderName: auth.isSuperAdmin ? (body.senderName || 'Suporte HelpUS') : (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente'),
+      senderRole,
+      isInternalNote,
       content: body.content,
       attachments: body.attachments,
     });

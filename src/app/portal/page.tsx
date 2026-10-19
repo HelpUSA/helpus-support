@@ -114,26 +114,31 @@ export default function ClientPortalPage() {
   }, [selectedTicket]);
 
   useEffect(() => {
-    // Process Google OAuth redirect parameters if present
-    const urlParams = new URLSearchParams(window.location.search);
-    const gEmail = urlParams.get('google_email');
-    const gName = urlParams.get('google_name') || undefined;
-    const gPic = urlParams.get('google_picture') || undefined;
+    // Check server session cookie first
+    fetch('/api/auth/session')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (data?.authenticated && data?.user) {
+          const sUser: UserAccount = {
+            id: data.user.id || data.user.email,
+            email: data.user.email,
+            name: data.user.name || data.user.email.split('@')[0],
+            role: data.user.role,
+            tenantId: data.user.tenantId,
+            username: data.user.username || data.user.email.split('@')[0],
+            hasSupportAccess: data.user.hasSupportAccess ?? true,
+            allowedTenantIds: data.user.allowedTenantIds || [data.user.tenantId],
+            status: data.user.status || 'active',
+          };
+          setUser(sUser);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('helpus_auth_user_v2', JSON.stringify(sUser));
+          }
+        }
+      })
+      .catch(() => {});
 
-    let currentUser: UserAccount | null = null;
-
-    if (gEmail) {
-      const res = AuthService.loginWithGoogle(gEmail, gName, gPic);
-      if (res.success && res.user) {
-        currentUser = res.user;
-      }
-      // Clean up URL parameters from browser history
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-
-    if (!currentUser) {
-      currentUser = AuthService.getCurrentUser();
-    }
+    let currentUser: UserAccount | null = AuthService.getCurrentUser();
 
     if (currentUser && currentUser.email !== 'helpus.ecommerce@gmail.com' && currentUser.email !== 'wagner.redes@gmail.com' && currentUser.role !== 'super_admin') {
       currentUser.role = 'client_admin';

@@ -1,18 +1,30 @@
 import { NextResponse } from 'next/server';
+import { signSessionToken, isAuthorizedSuperAdminEmail } from '@/lib/serverAuth';
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '812202824664-s716306ibb7c15jh7aok2v0lfnuocpkn.apps.googleusercontent.com';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const error = searchParams.get('error');
+  const state = searchParams.get('state');
 
   const hostOrigin = origin || 'https://support.helpusbr.com';
   const redirectUri = `${hostOrigin}/api/auth/callback/google`;
 
   if (error || !code) {
     return NextResponse.redirect(`${hostOrigin}/portal?error=google_auth_failed`);
+  }
+
+  // State verification if state cookie was set
+  const cookiesHeader = request.headers.get('cookie') || '';
+  const stateCookieMatch = cookiesHeader.match(/helpus_oauth_state=([^;]+)/);
+  const expectedState = stateCookieMatch ? decodeURIComponent(stateCookieMatch[1].trim()) : null;
+
+  if (expectedState && state && state !== expectedState) {
+    console.error('OAuth state mismatch rejected');
+    return NextResponse.redirect(`${hostOrigin}/portal?error=oauth_state_mismatch`);
   }
 
   try {
@@ -35,20 +47,73 @@ export async function GET(request: Request) {
       return NextResponse.redirect(`${hostOrigin}/portal?error=google_token_failed`);
     }
 
-    const base64Payload = tokenData.id_token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
-    const payloadJson = Buffer.from(base64Payload, 'base64').toString('utf-8');
-    const userProfile = JSON.parse(payloadJson);
+    // Cryptographic validation of Google id_token via Google tokeninfo endpoint
+    // Google validates signature, issuer, audience and expiry
+    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenData.id_token)}`);
+    if (!verifyRes.ok) {
+      console.error('Cryptographic verification of Google id_token failed:', verifyRes.status);
+      return NextResponse.redirect(`${hostOrigin}/portal?error=invalid_google_token_signature`);
+    }
 
-    const email = userProfile.email;
-    const name = userProfile.name || email.split('@')[0];
-    const picture = userProfile.picture || '';
+    const tokenInfo = await verifyRes.json();
+
+    // Verify Audience (aud) matches our client ID
+    if (GOOGLE_CLIENT_ID && tokenInfo.aud && tokenInfo.aud !== GOOGLE_CLIENT_ID) {
+      console.error('Google token audience mismatch:', tokenInfo.aud);
+      return NextResponse.redirect(`${hostOrigin}/portal?error=invalid_token_audience`);
+    }
+
+    // Verify Issuer
+    const validIssuers = ['https://accounts.google.com', 'accounts.google.com'];
+    if (tokenInfo.iss && !validIssuers.includes(tokenInfo.iss)) {
+      console.error('Google token issuer invalid:', tokenInfo.iss);
+      return NextResponse.redirect(`${hostOrigin}/portal?error=invalid_token_issuer`);
+    }
+
+    // Verify Expiration
+    const expSeconds = Number(tokenInfo.exp);
+    if (!isNaN(expSeconds) && expSeconds * 1000 <= Date.now()) {
+      console.error('Google token expired:', tokenInfo.exp);
+      return NextResponse.redirect(`${hostOrigin}/portal?error=token_expired`);
+    }
+
+    const email = tokenInfo.email;
+    if (!email) {
+      return NextResponse.redirect(`${hostOrigin}/portal?error=no_email_in_token`);
+    }
+
+    const name = tokenInfo.name || email.split('@')[0];
+
+    // Authoritative role assignment on the server
+    const isSuperAdmin = isAuthorizedSuperAdminEmail(email);
+    const role = isSuperAdmin ? 'super_admin' : 'client_admin';
+    const tenantId = isSuperAdmin ? 'all' : (email.includes('@') ? email.split('@')[1].replace(/\./g, '-') : 'general');
+
+    // Issue cryptographically signed HMAC-SHA256 session token
+    const sessionToken = signSessionToken({
+      sub: email,
+      email,
+      name,
+      role,
+      tenantId,
+    });
 
     const portalUrl = new URL(`${hostOrigin}/portal`);
-    portalUrl.searchParams.set('google_email', email);
-    portalUrl.searchParams.set('google_name', name);
-    if (picture) portalUrl.searchParams.set('google_picture', picture);
+    const response = NextResponse.redirect(portalUrl.toString());
 
-    return NextResponse.redirect(portalUrl.toString());
+    // Bind session to HttpOnly, SameSite, Secure cookie
+    response.cookies.set('helpus_session', sessionToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: 7 * 24 * 3600, // 7 days
+      path: '/',
+    });
+
+    // Remove state cookie
+    response.cookies.delete('helpus_oauth_state');
+
+    return response;
   } catch (err) {
     console.error('Error in Google Auth callback:', err);
     return NextResponse.redirect(`${hostOrigin}/portal?error=google_callback_exception`);

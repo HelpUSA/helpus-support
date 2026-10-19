@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ticketStore } from '@/lib/store';
-import { validateServerApiAccess } from '@/lib/auth';
+import { validateServerApiAccess, projectTicketListForUser, projectTicketForUser } from '@/lib/serverAuth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -8,7 +8,7 @@ export const revalidate = 0;
 const ANTI_CACHE_HEADERS = {
   'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, private',
   'Pragma': 'no-cache',
-  'Vary': 'Authorization, x-user-email, x-tenant-id, x-user-role',
+  'Vary': 'Authorization, Cookie',
 };
 
 export async function GET(request: NextRequest) {
@@ -52,8 +52,10 @@ export async function GET(request: NextRequest) {
   }
 
   const tickets = await ticketStore.getTicketsAsync(effectiveTenant);
+  const projected = projectTicketListForUser(tickets, auth.isSuperAdmin);
+
   return NextResponse.json(
-    { success: true, version: 'v_2026_10_19_r26_05', count: tickets.length, data: tickets },
+    { success: true, version: 'v_2026_10_19_r26_sec', count: projected.length, data: projected },
     { status: 200, headers: ANTI_CACHE_HEADERS }
   );
 }
@@ -111,7 +113,7 @@ export async function POST(request: NextRequest) {
       clientTicketCount: body.clientTicketCount,
     } as any);
 
-    return NextResponse.json({ success: true, data: newTicket }, { status: 201, headers: ANTI_CACHE_HEADERS });
+    return NextResponse.json({ success: true, data: projectTicketForUser(newTicket, auth.isSuperAdmin) }, { status: 201, headers: ANTI_CACHE_HEADERS });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message || 'Erro ao criar ticket' }, { status: 500, headers: ANTI_CACHE_HEADERS });
   }

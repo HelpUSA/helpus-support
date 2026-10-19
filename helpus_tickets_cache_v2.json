@@ -1,5 +1,117 @@
 [
   {
+    "id": "tck-test-publicarte-001",
+    "tenantId": "publicarte",
+    "tenantName": "Public Arte Test",
+    "code": "PUB-TEST-01",
+    "title": "Ticket Teste Public Arte",
+    "description": "Ticket para testes de segurança",
+    "category": "support",
+    "priority": "medium",
+    "status": "in_progress",
+    "createdByEmail": "contato@publicarte.com",
+    "createdByName": "Cliente Publicarte",
+    "adminNotes": "NOTA_ADMIN_CONFIDENCIAL_SUPERADMIN_ONLY",
+    "messages": [
+      {
+        "id": "msg-pub-1",
+        "ticketId": "tck-test-publicarte-001",
+        "senderId": "contato@publicarte.com",
+        "senderName": "Cliente Publicarte",
+        "senderRole": "client",
+        "isInternalNote": false,
+        "content": "Mensagem pública do cliente",
+        "createdAt": "2026-10-19T15:34:32.165Z"
+      },
+      {
+        "id": "msg-pub-internal",
+        "ticketId": "tck-test-publicarte-001",
+        "senderId": "agent@helpusbr.com",
+        "senderName": "Atendente Master",
+        "senderRole": "agent",
+        "isInternalNote": true,
+        "content": "NOTA_INTERNA_CONFIDENCIAL_EQUIPE_TECNICA",
+        "createdAt": "2026-10-19T15:34:32.166Z"
+      },
+      {
+        "id": "msg-1792424073059",
+        "ticketId": "tck-test-publicarte-001",
+        "senderId": "contato@publicarte.com",
+        "senderName": "contato",
+        "senderRole": "client",
+        "isInternalNote": false,
+        "content": "Tentativa de enviar mensagem com papel agent falsificado",
+        "createdAt": "2026-10-19T15:34:33.059Z"
+      },
+      {
+        "id": "msg-res-1792424075033",
+        "ticketId": "tck-test-publicarte-001",
+        "senderId": "ia.engine@helpusbr.com",
+        "senderName": "IA Autônoma (HelpUS Tech)",
+        "senderRole": "agent",
+        "isInternalNote": false,
+        "content": "Solução testada pelo SuperAdmin",
+        "createdAt": "2026-10-19T15:34:35.033Z"
+      },
+      {
+        "id": "msg-1792424075724",
+        "ticketId": "tck-test-publicarte-001",
+        "senderId": "contato@publicarte.com",
+        "senderName": "contato",
+        "senderRole": "client",
+        "isInternalNote": false,
+        "content": "✅ *Chamado Concluído & Encerrado pelo Cliente (contato)*\n\nAvaliação / Feedback: Tudo perfeito, obrigado!",
+        "createdAt": "2026-10-19T15:34:35.724Z"
+      },
+      {
+        "id": "msg-1792424076374",
+        "ticketId": "tck-test-publicarte-001",
+        "senderId": "contato@publicarte.com",
+        "senderName": "contato",
+        "senderRole": "client",
+        "isInternalNote": false,
+        "content": "🔄 *Chamado Reaberto pelo Cliente (contato)*\n\nMotivo da Reabertura: Necessito de ajuste adicional na integração",
+        "createdAt": "2026-10-19T15:34:36.374Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "att-pub-1",
+        "name": "anexo_publicarte.png",
+        "url": "https://cdn.helpusbr.com/att-pub-1.png",
+        "type": "image/png",
+        "size": 1024
+      }
+    ],
+    "createdAt": "2026-10-19T15:34:32.166Z",
+    "updatedAt": "2026-10-19T15:34:36.374Z"
+  },
+  {
+    "id": "tck-test-neuro-002",
+    "tenantId": "neuro.eduardomagalhaes",
+    "tenantName": "Neuro Test",
+    "code": "NEU-TEST-02",
+    "title": "Ticket Teste Neuro",
+    "description": "Dados médicos confidenciais neuro",
+    "category": "support",
+    "priority": "high",
+    "status": "pending_approval",
+    "createdByEmail": "eduardojcmagalhaes@gmail.com",
+    "createdByName": "Dr Eduardo",
+    "attachments": [
+      {
+        "id": "att-neuro-secret-1",
+        "name": "laudo_sigiloso.pdf",
+        "url": "https://cdn.helpusbr.com/laudo.pdf",
+        "type": "application/pdf",
+        "size": 2048
+      }
+    ],
+    "messages": [],
+    "createdAt": "2026-10-19T15:34:32.166Z",
+    "updatedAt": "2026-10-19T15:34:32.166Z"
+  },
+  {
     "id": "tck-1791240000000",
     "tenantId": "usmle",
     "tenantName": "USMLE Prep Suite",

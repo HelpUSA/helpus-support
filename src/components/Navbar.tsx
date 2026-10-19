@@ -64,13 +64,22 @@ export default function Navbar({
         </div>
 
         {/* Quick Links */}
-        <div className="flex items-center gap-4 text-xs font-medium">
+        <div className="flex items-center gap-2 md:gap-4 text-xs font-medium">
           <Link
             href="/portal"
-            className="flex items-center gap-1.5 px-3 py-2 text-indigo-400 bg-indigo-500/10 rounded-xl border border-indigo-500/20 hover:bg-indigo-500/20 transition-all"
+            className="flex items-center gap-1.5 px-2.5 md:px-3 py-2 text-indigo-400 bg-indigo-500/10 rounded-xl border border-indigo-500/20 hover:bg-indigo-500/20 transition-all"
           >
             <Kanban className="w-4 h-4" />
-            Portal de Chamados
+            <span className="hidden sm:inline">Portal de Chamados</span>
+            <span className="sm:hidden">Portal</span>
+          </Link>
+          <Link
+            href="/superadmin/helpusdev"
+            className="flex items-center gap-1.5 px-2.5 md:px-3 py-2 text-sky-400 bg-sky-500/10 rounded-xl border border-sky-500/20 hover:bg-sky-500/20 transition-all"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span className="hidden sm:inline">Control Center</span>
+            <span className="sm:hidden">Painel</span>
           </Link>
         </div>
       </div>

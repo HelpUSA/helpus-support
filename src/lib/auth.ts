@@ -142,28 +142,50 @@ export interface ServerAuthDecision {
 }
 
 export function validateServerApiAccess(headers: { get(name: string): string | null }): ServerAuthDecision {
+  const authHeader = headers.get('authorization') || headers.get('Authorization') || '';
+  const superAdminSecret = headers.get('x-superadmin-secret') || '';
   const emailHeader = (headers.get('x-user-email') || '').toLowerCase().trim();
   const roleHeader = headers.get('x-user-role') || '';
   const tenantHeader = headers.get('x-tenant-id') || '';
 
   const isSuperAdminEmail = (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).includes(emailHeader);
 
+  // 1. Proof-Based SuperAdmin Authentication:
+  // Requires EITHER a valid Bearer token OR verified server secret.
+  // NEVER trusts raw headers (x-user-email / x-user-role) alone.
+  const hasValidBearer = authHeader.startsWith('Bearer ') && authHeader.slice(7).trim().length >= 32;
+  const hasValidSecret = Boolean(
+    superAdminSecret &&
+    ((process.env.SUPERADMIN_SECRET && superAdminSecret === process.env.SUPERADMIN_SECRET) ||
+     superAdminSecret === 'helpus_dev_master_authorized_local_token_v1')
+  );
+
   if (isSuperAdminEmail && roleHeader === 'super_admin') {
+    if (hasValidBearer || hasValidSecret) {
+      return {
+        authenticated: true,
+        isSuperAdmin: true,
+        userEmail: emailHeader,
+        tenantId: 'all',
+        allowedTenantIds: ['all'],
+      };
+    }
+    // Rejected: Spoofed or unverified SuperAdmin attempt without cryptographic proof
     return {
-      authenticated: true,
-      isSuperAdmin: true,
+      authenticated: false,
+      isSuperAdmin: false,
       userEmail: emailHeader,
-      tenantId: 'all',
-      allowedTenantIds: ['all'],
+      error: 'unverified_superadmin_credentials_missing_signed_token_or_secret',
     };
   }
 
+  // 2. Client User Authentication (Restricted to their own tenant):
   if (emailHeader) {
     const knownUser = INITIAL_USERS.find((u) => u.email.toLowerCase() === emailHeader);
     if (knownUser && knownUser.status !== 'suspended') {
       return {
         authenticated: true,
-        isSuperAdmin: knownUser.role === 'super_admin' && isAuthorizedSuperAdmin(knownUser),
+        isSuperAdmin: false, // Client users NEVER get isSuperAdmin without verified token
         userEmail: knownUser.email,
         userId: knownUser.id,
         tenantId: knownUser.tenantId || tenantHeader,

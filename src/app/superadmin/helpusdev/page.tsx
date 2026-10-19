@@ -1,7 +1,22 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import { AuthService, UserAccount } from '@/lib/auth';
+import { AuthService, UserAccount, isAuthorizedSuperAdmin } from '@/lib/auth';
+import {
+  Activity,
+  Cpu,
+  Layers,
+  ListChecks,
+  FileText,
+  RefreshCw,
+  Smartphone,
+  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle,
+  Clock,
+  ArrowRight
+} from 'lucide-react';
 
 interface AgentStatus {
   agent_id: string;
@@ -55,6 +70,8 @@ interface IntentProjection {
   host_ack_detail?: string;
 }
 
+type MobileTab = 'overview' | 'agents' | 'tasks' | 'events' | 'intents' | 'cas';
+
 export default function HelpUSDevSuperAdminControlCenterPage() {
   const [user, setUser] = useState<UserAccount | null>(null);
   const [sessionToken, setSessionToken] = useState<string>('');
@@ -68,8 +85,9 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [intentFeedback, setIntentFeedback] = useState<string>('');
   const [submittingVerb, setSubmittingVerb] = useState<string | null>(null);
+  const [mobileTab, setMobileTab] = useState<MobileTab>('overview');
 
-    const [artifacts, setArtifacts] = useState<any[]>([]);
+  const [artifacts, setArtifacts] = useState<any[]>([]);
   const [patches, setPatches] = useState<any[]>([]);
   const [locks, setLocks] = useState<any[]>([]);
 
@@ -115,7 +133,7 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
     try {
       const current = AuthService.getCurrentUser();
       setUser(current);
-      if (!current || current.role !== 'super_admin') {
+      if (!current || !isAuthorizedSuperAdmin(current)) {
         setLoading(false);
         return;
       }
@@ -192,9 +210,8 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
         setIntentFeedback(`Falha (${res.status}): ${data.error || 'Intenção recusada pelo servidor'}`);
       } else {
         const createdIntent = data.intent as IntentProjection;
-        // Never report presumed execution: report exact server status ('submitted') awaiting host ACK!
         setIntentFeedback(
-          `Intenção registrada no Control Center: id=${createdIntent.intent_id} | status=${createdIntent.status.toUpperCase()} (Aguardando ACK real do executor local Windows — não presumir aplicação antes de status='applied').`
+          `Intenção registrada no Control Center: id=${createdIntent.intent_id} | status=${createdIntent.status.toUpperCase()} (Aguardando ACK real do executor local Windows).`
         );
       }
       await fetchDashboardEndpoints(sessionToken);
@@ -205,15 +222,18 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
     }
   };
 
-  if (!user || user.role !== 'super_admin') {
+  if (!user || !isAuthorizedSuperAdmin(user)) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
-        <div className="max-w-lg w-full bg-slate-900 border border-rose-500/40 rounded-xl p-6 shadow-xl">
-          <h1 className="text-xl font-bold text-rose-400 mb-2">
-            Acesso Restrito — HelpUSDev Control Center (RBAC SuperAdmin)
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-900 border border-rose-500/40 rounded-2xl p-6 shadow-2xl text-center space-y-4">
+          <div className="w-12 h-12 rounded-full bg-rose-500/10 text-rose-400 mx-auto flex items-center justify-center border border-rose-500/20">
+            <XCircle className="w-6 h-6" />
+          </div>
+          <h1 className="text-lg font-bold text-rose-400">
+            Acesso Restrito — SuperAdmin
           </h1>
-          <p className="text-sm text-slate-300">
-            Esta área é exclusiva para contas com papel <code className="text-rose-300">super_admin</code> verificadas no servidor e isoladas por tenant. Contas de clientes ou agentes não possuem permissão de leitura ou envio de intenções.
+          <p className="text-xs text-slate-300 leading-relaxed">
+            Esta área é exclusiva para contas Master SuperAdmin verificadas no servidor. Manipulações de perfil no navegador ou acessos anônimos são bloqueados por segurança.
           </p>
         </div>
       </div>
@@ -223,78 +243,161 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
   const isStale = overview ? Boolean(overview.is_stale) : true;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 space-y-6">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 rounded-xl p-5">
+    <div className="min-h-screen bg-slate-950 text-slate-100 p-3 sm:p-5 md:p-6 space-y-4 sm:space-y-6">
+      {/* Header com Responsividade e Indicadores de Estado */}
+      <header className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-lg">
         <div>
-          <h1 className="text-2xl font-bold text-sky-400">
-            HelpUSDev Control Center — Supervisão Multiagente (R18.5)
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Persistência SQLite Transacional (WAL) + Intenções Administrativas com ACK Verificado | Versão de Estado: #{overview?.state_version ?? '—'}
+          <div className="flex items-center gap-2">
+            <h1 className="text-lg sm:text-2xl font-bold text-sky-400 flex items-center gap-2">
+              <Cpu className="w-5 h-5 sm:w-6 sm:h-6 text-indigo-400" />
+              HelpUSDev Control Center
+            </h1>
+            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 rounded-full">
+              R26.4 Mobile
+            </span>
+          </div>
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-1">
+            Supervisão Multiagente (WAL) | Estado: #{overview?.state_version ?? '—'} | Tailscale Ready
           </p>
         </div>
-        <div className="flex items-center gap-3">
+
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <button
             type="button"
             onClick={() => sessionToken && fetchDashboardEndpoints(sessionToken)}
-            className="px-3 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200"
+            disabled={loading}
+            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 active:scale-95 border border-slate-700 text-slate-200 transition"
           >
-            {loading ? 'Carregando...' : 'Atualizar Agora'}
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Atualizando...' : 'Atualizar'}
           </button>
           <div
             data-testid="stale-indicator-banner"
-            className={`px-4 py-2 rounded-lg text-xs font-semibold border ${
+            className={`px-3 py-1.5 rounded-xl text-[11px] font-semibold border flex items-center gap-1.5 ${
               isStale
                 ? 'bg-amber-950/80 border-amber-500 text-amber-300'
                 : 'bg-emerald-950/80 border-emerald-500 text-emerald-300'
             }`}
           >
-            {overview?.stale_banner_message || 'DADOS DEFASADOS: Aguardando sincronização outbound do worker Windows'}
+            {isStale ? <AlertTriangle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+            <span>{isStale ? 'Sincronizando' : 'Ao Vivo'}</span>
           </div>
         </div>
       </header>
 
+      {/* Banner de Otimização Mobile & Tailscale Read-Only */}
+      <div className="flex md:hidden items-center justify-between bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-[11px] text-slate-400">
+        <span className="flex items-center gap-1.5 text-sky-300 font-medium">
+          <Smartphone className="w-3.5 h-3.5" /> Modo Smartphone Otimizado
+        </span>
+        <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
+          Tailscale Read-Only
+        </span>
+      </div>
+
+      {/* Mobile Tab Selector Bar (Sticky para Smartphones) */}
+      <nav className="flex md:hidden overflow-x-auto gap-1.5 p-1 bg-slate-900/90 rounded-xl border border-slate-800 sticky top-16 z-40 backdrop-blur">
+        {[
+          { id: 'overview', label: 'Métricas' },
+          { id: 'agents', label: `Agentes (${agents.length})` },
+          { id: 'tasks', label: `Tarefas (${tasks.length})` },
+          { id: 'events', label: `Eventos (${events.length})` },
+          { id: 'intents', label: 'Intenções' },
+          { id: 'cas', label: `CAS (${artifacts.length})` },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setMobileTab(tab.id as MobileTab)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition min-h-[36px] ${
+              mobileTab === tab.id
+                ? 'bg-indigo-600 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
       {errorMsg && (
         <div
           data-testid="control-center-error-banner"
-          className="bg-rose-950/80 border border-rose-500/60 text-rose-200 rounded-xl p-4 text-xs font-mono"
+          className="bg-rose-950/80 border border-rose-500/60 text-rose-200 rounded-xl p-3 text-xs font-mono"
         >
-          Erro ao consultar endpoints do Control Center: {errorMsg}
+          Erro ao consultar endpoints: {errorMsg}
         </div>
       )}
 
-      {/* Visão Geral */}
-      <section className="grid grid-cols-2 md:grid-cols-6 gap-4">
+      {/* Seção 1: Métricas Gerais (Visível em overview ou desktop) */}
+      <section className={`${mobileTab === 'overview' ? 'grid' : 'hidden md:grid'} grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5 sm:gap-4`}>
         {[
           { label: 'Tarefas Ativas', value: overview?.counts?.active_tasks ?? 0, color: 'text-sky-400' },
-          { label: 'Backlog na Fila', value: overview?.counts?.queued_backlog ?? 0, color: 'text-teal-400' },
+          { label: 'Backlog Fila', value: overview?.counts?.queued_backlog ?? 0, color: 'text-teal-400' },
           { label: 'Bloqueadas', value: overview?.counts?.blocked_tasks ?? 0, color: 'text-rose-400' },
-          { label: 'Aguardando Humano', value: overview?.counts?.awaiting_human ?? 0, color: 'text-amber-400' },
+          { label: 'Aguardando', value: overview?.counts?.awaiting_human ?? 0, color: 'text-amber-400' },
           { label: 'Concluídas', value: overview?.counts?.completed_tasks ?? 0, color: 'text-emerald-400' },
           { label: 'Eventos (Seq)', value: overview?.counts?.total_events ?? 0, color: 'text-purple-400' },
         ].map((metric) => (
-          <div key={metric.label} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-            <div className="text-xs text-slate-400">{metric.label}</div>
-            <div className={`text-2xl font-bold mt-1 ${metric.color}`}>{metric.value}</div>
+          <div key={metric.label} className="bg-slate-900 border border-slate-800 rounded-xl p-3 sm:p-4">
+            <div className="text-[11px] sm:text-xs text-slate-400">{metric.label}</div>
+            <div className={`text-xl sm:text-2xl font-bold mt-1 ${metric.color}`}>{metric.value}</div>
           </div>
         ))}
       </section>
 
-      {/* Disponibilidade Observada dos Agentes (Separação Estrita DOM Click vs Resposta Real) */}
-      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-        <h2 className="text-sm font-bold text-slate-200 mb-3">
-          Disponibilidade Observada dos Agentes (Separação Honesta: Clique DOM vs Resposta Real vs Validação)
-        </h2>
-        <div className="overflow-x-auto">
+      {/* Seção 2: Agentes Conectados */}
+      <section className={`${mobileTab === 'agents' || mobileTab === 'overview' ? 'block' : 'hidden md:block'} bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-3`}>
+        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+          <h2 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+            <Activity className="w-4 h-4 text-emerald-400" />
+            Disponibilidade dos Agentes ({agents.length})
+          </h2>
+          <span className="text-[10px] text-slate-400 font-mono">Separação: DOM Click vs Modelo Real</span>
+        </div>
+
+        {/* Visualização em Cards para Smartphones (Mobile-First) */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:hidden gap-3">
+          {agents.map((ag) => (
+            <div key={ag.agent_id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-slate-200">{ag.display_name}</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                    ag.availability === 'online'
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                      : ag.availability === 'partial'
+                      ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                      : 'bg-rose-950 text-rose-300 border border-rose-700'
+                  }`}
+                >
+                  {ag.availability.toUpperCase()}
+                </span>
+              </div>
+              <div className="space-y-1 text-[11px] text-slate-400 font-mono">
+                <div>DOM Ack: <span className="text-slate-300">{ag.last_delivery_acked_utc || '—'}</span></div>
+                <div>Modelo: <span className="text-emerald-300">{ag.last_model_reply_observed_utc || '—'}</span></div>
+                <div>Validado: <span className="text-sky-300">{ag.last_output_validated_utc || '—'}</span></div>
+              </div>
+              {ag.diagnostic_note_redacted && (
+                <div className="text-[10px] text-slate-400 bg-slate-900 p-2 rounded border border-slate-800">
+                  {ag.diagnostic_note_redacted}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* Visualização em Tabela para Desktop */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="text-slate-400 border-b border-slate-800">
               <tr>
                 <th className="py-2 pr-4">Agente</th>
                 <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">Último Clique DOM (delivery_acked)</th>
-                <th className="py-2 pr-4">Última Resposta Real (model_reply_observed)</th>
-                <th className="py-2 pr-4">Última Validação (output_validated)</th>
-                <th className="py-2">Diagnóstico Redigido</th>
+                <th className="py-2 pr-4">Clique DOM (delivery_acked)</th>
+                <th className="py-2 pr-4">Resposta Real (model_reply)</th>
+                <th className="py-2 pr-4">Validação (validated)</th>
+                <th className="py-2">Diagnóstico</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -325,24 +428,26 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
         </div>
       </section>
 
-      {/* Controles de Intenção Administrativa Autenticada & Status de ACK Real */}
-      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2">
-          <h2 className="text-sm font-bold text-slate-200">
-            Intenções Administrativas Autenticadas (helpusdev.intent.v1 — Revalidação Obrigatória no Host Local)
+      {/* Seção 3: Intenções Administrativas */}
+      <section className={`${mobileTab === 'intents' || mobileTab === 'overview' ? 'block' : 'hidden md:block'} bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-800 pb-2">
+          <h2 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-sky-400" />
+            Intenções Administrativas Autenticadas
           </h2>
-          <span className="text-xs text-slate-400">
-            Pendentes de ACK: <strong className="text-amber-300">{overview?.counts?.pending_intents ?? 0}</strong> | Aplicadas com ACK real:{' '}
-            <strong className="text-emerald-300">{overview?.counts?.applied_intents ?? 0}</strong>
+          <span className="text-[11px] text-slate-400 font-mono">
+            Pendentes: <strong className="text-amber-300">{overview?.counts?.pending_intents ?? 0}</strong> | Aplicadas: <strong className="text-emerald-300">{overview?.counts?.applied_intents ?? 0}</strong>
           </span>
         </div>
-        <div className="flex flex-wrap gap-3">
+
+        {/* Botões Touch-Friendly com altura mínima 44px */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
           {(
             [
-              { verb: 'pause', label: 'Pausar Fila (pause)' },
-              { verb: 'resume', label: 'Retomar Fila (resume)' },
-              { verb: 'reprioritize', label: 'Repriorizar Tarefa (reprioritize)' },
-              { verb: 'request_diagnostics', label: 'Solicitar Diagnóstico (request_diagnostics)' },
+              { verb: 'pause', label: 'Pausar Fila' },
+              { verb: 'resume', label: 'Retomar Fila' },
+              { verb: 'reprioritize', label: 'Repriorizar' },
+              { verb: 'request_diagnostics', label: 'Diagnóstico' },
             ] as const
           ).map((btn) => (
             <button
@@ -350,129 +455,140 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
               type="button"
               disabled={submittingVerb !== null}
               onClick={() => handleDispatchIntent(btn.verb, 'coordinator')}
-              className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 text-slate-200 transition"
+              className="min-h-[44px] px-3.5 py-2.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 active:scale-95 disabled:opacity-50 border border-slate-700 text-slate-200 transition flex items-center justify-center text-center"
             >
-              {submittingVerb === btn.verb ? `Enviando ${btn.verb}...` : btn.label}
+              {submittingVerb === btn.verb ? 'Enviando...' : btn.label}
             </button>
           ))}
         </div>
+
         {intentFeedback && (
-          <div data-testid="intent-feedback-box" className="text-xs text-sky-300 font-mono bg-slate-950/70 border border-slate-800 rounded-lg p-3">
+          <div data-testid="intent-feedback-box" className="text-xs text-sky-300 font-mono bg-slate-950/70 border border-slate-800 rounded-xl p-3">
             {intentFeedback}
           </div>
         )}
+
+        {/* Intenções Recentes em Cards para Mobile */}
         {intents.length > 0 && (
-          <div className="overflow-x-auto pt-2">
-            <table className="w-full text-left text-xs">
-              <thead className="text-slate-400 border-b border-slate-800">
-                <tr>
-                  <th className="py-1.5 pr-3">Intent ID</th>
-                  <th className="py-1.5 pr-3">Verbo</th>
-                  <th className="py-1.5 pr-3">Alvo</th>
-                  <th className="py-1.5 pr-3">Status Real</th>
-                  <th className="py-1.5 pr-3">ACK do Host (acked_at_utc)</th>
-                  <th className="py-1.5">Detalhe do Executor Local</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/50">
-                {intents.map((it) => (
-                  <tr key={it.intent_id}>
-                    <td className="py-1.5 pr-3 font-mono text-slate-300">{it.intent_id}</td>
-                    <td className="py-1.5 pr-3 font-semibold text-sky-300">{it.verb}</td>
-                    <td className="py-1.5 pr-3 font-mono text-slate-400">{it.target_id}</td>
-                    <td className="py-1.5 pr-3">
-                      <span
-                        className={`px-2 py-0.5 rounded font-semibold ${
-                          it.status === 'applied'
-                            ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
-                            : it.status === 'submitted'
-                            ? 'bg-amber-950 text-amber-300 border border-amber-700'
-                            : 'bg-rose-950 text-rose-300 border border-rose-700'
-                        }`}
-                      >
-                        {it.status.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="py-1.5 pr-3 font-mono text-slate-300">{it.acked_at_utc || 'AGUARDANDO_HOST_ACK'}</td>
-                    <td className="py-1.5 text-slate-400">{it.host_ack_detail || 'Pendente de consumo pelo worker Windows'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-slate-300">Intenções Registradas</h3>
+            <div className="space-y-2 max-h-60 overflow-y-auto">
+              {intents.map((it) => (
+                <div key={it.intent_id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 text-xs flex justify-between items-center">
+                  <div>
+                    <span className="font-semibold text-sky-300 uppercase">{it.verb}</span>
+                    <span className="text-[10px] text-slate-400 font-mono ml-2">{it.intent_id}</span>
+                  </div>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                      it.status === 'applied'
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-700'
+                        : it.status === 'submitted'
+                        ? 'bg-amber-950 text-amber-300 border border-amber-700'
+                        : 'bg-rose-950 text-rose-300 border border-rose-700'
+                    }`}
+                  >
+                    {it.status.toUpperCase()}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </section>
 
-      {/* Tarefas Recentes e Timeline de Eventos */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <h2 className="text-sm font-bold text-slate-200 mb-3">Tarefas Recentes ({tasks.length})</h2>
+      {/* Seção 4: Tarefas Recentes e Eventos Canônicos */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+        {/* Tarefas */}
+        <section className={`${mobileTab === 'tasks' || mobileTab === 'overview' ? 'block' : 'hidden md:block'} bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-3`}>
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h2 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+              <ListChecks className="w-4 h-4 text-sky-400" />
+              Tarefas Recentes ({tasks.length})
+            </h2>
+          </div>
           <div className="space-y-2 max-h-80 overflow-y-auto">
-            {tasks.map((tk) => (
-              <div key={tk.task_id} className="bg-slate-950/70 border border-slate-800 rounded-lg p-3 text-xs flex justify-between items-center">
-                <div>
-                  <div className="font-mono font-semibold text-slate-200">{tk.task_id}</div>
-                  <div className="text-slate-400">{tk.title} — Agente: {tk.assigned_agent}</div>
+            {tasks.length === 0 ? (
+              <div className="text-slate-500 italic p-3 text-xs">Nenhuma tarefa recente.</div>
+            ) : (
+              tasks.map((tk) => (
+                <div key={tk.task_id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs flex justify-between items-center gap-2">
+                  <div className="truncate">
+                    <div className="font-mono font-semibold text-slate-200 truncate">{tk.task_id}</div>
+                    <div className="text-slate-400 text-[11px] truncate">{tk.title} — {tk.assigned_agent}</div>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-mono whitespace-nowrap ${
+                    tk.state === 'completed'
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : tk.state === 'blocked' || tk.state === 'failed'
+                      ? 'bg-rose-950 text-rose-300 border border-rose-800'
+                      : 'bg-slate-800 text-sky-300'
+                  }`}>
+                    {tk.state}
+                  </span>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-slate-800 text-sky-300 font-mono">{tk.state}</span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </section>
 
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <h2 className="text-sm font-bold text-slate-200 mb-3">
-            Timeline de Eventos Canônicos ({events.length} | Lacunas ativas: {overview?.counts?.seq_gaps ?? 0} | Reconciliadas: {overview?.counts?.reconciled_seq_gaps ?? 0})
-          </h2>
+        {/* Timeline de Eventos */}
+        <section className={`${mobileTab === 'events' || mobileTab === 'overview' ? 'block' : 'hidden md:block'} bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-3`}>
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <h2 className="text-sm font-bold text-slate-200 flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-purple-400" />
+              Timeline de Eventos ({events.length})
+            </h2>
+            <span className="text-[10px] text-slate-400 font-mono">Gaps: {overview?.counts?.seq_gaps ?? 0}</span>
+          </div>
           <div className="space-y-2 max-h-80 overflow-y-auto">
-            {events.map((ev) => (
-              <div key={ev.event_id} className="bg-slate-950/70 border border-slate-800 rounded-lg p-3 text-xs">
-                <div className="flex justify-between font-mono text-slate-400">
-                  <span>seq #{ev.seq} — {ev.event_type}</span>
-                  <span>{ev.occurred_at_utc}</span>
+            {events.length === 0 ? (
+              <div className="text-slate-500 italic p-3 text-xs">Nenhum evento registrado.</div>
+            ) : (
+              events.map((ev) => (
+                <div key={ev.event_id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs space-y-1">
+                  <div className="flex justify-between font-mono text-[10px] text-slate-400">
+                    <span className="text-sky-300 font-semibold">#{ev.seq} — {ev.event_type}</span>
+                    <span>{ev.occurred_at_utc?.slice(11, 19)}</span>
+                  </div>
+                  <div className="text-slate-200 text-[11px] line-clamp-2">{ev.summary_redacted}</div>
                 </div>
-                <div className="text-slate-200 mt-1">{ev.summary_redacted}</div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </section>
       </div>
 
-      {/* Central de Arquivos CAS & Smart Patch Engine (R21) */}
-      <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-          <div>
-            <h2 className="text-sm font-bold text-sky-300">
-              Central de Arquivos CAS &amp; Smart Patch Engine (HelpUSDev R21)
-            </h2>
-            <p className="text-xs text-slate-400">
-              Repositório soberano de artefatos por SHA-256 e alterações parciais atômicas com verificação Compare-And-Swap (CAS).
-            </p>
-          </div>
-          <div className="flex gap-4 text-xs font-mono">
-            <span className="text-slate-400">Artefatos CAS: <strong className="text-emerald-300">{artifacts.length}</strong></span>
-            <span className="text-slate-400">Patches Aplicados: <strong className="text-indigo-300">{patches.length}</strong></span>
-            <span className="text-slate-400">Travas Ativas: <strong className="text-amber-300">{locks.length}</strong></span>
+      {/* Seção 5: Central de Arquivos CAS & Smart Patches */}
+      <section className={`${mobileTab === 'cas' || mobileTab === 'overview' ? 'block' : 'hidden md:block'} bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 space-y-4`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-800 pb-2">
+          <h2 className="text-sm font-bold text-sky-300 flex items-center gap-1.5">
+            <Layers className="w-4 h-4 text-emerald-400" />
+            Central de Arquivos CAS &amp; Patches Atômicos
+          </h2>
+          <div className="flex gap-3 text-[11px] font-mono text-slate-400">
+            <span>CAS: <strong className="text-emerald-300">{artifacts.length}</strong></span>
+            <span>Patches: <strong className="text-indigo-300">{patches.length}</strong></span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
-          {/* Coluna 1: Artefatos CAS */}
+          {/* Artefatos CAS */}
           <div className="space-y-2">
-            <h3 className="font-semibold text-slate-300">Artefatos Armazenados por Hash (CAS)</h3>
+            <h3 className="font-semibold text-slate-300">Artefatos Armazenados (CAS)</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {artifacts.length === 0 ? (
-                <div className="text-slate-500 italic p-3 bg-slate-950/40 rounded-lg">Nenhum artefato armazenado no momento.</div>
+                <div className="text-slate-500 italic p-3 bg-slate-950/40 rounded-xl text-xs">Nenhum artefato armazenado.</div>
               ) : (
                 artifacts.map((art: any) => (
-                  <div key={art.artifact_ref} className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 font-mono text-[11px] space-y-1">
+                  <div key={art.artifact_ref} className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 font-mono text-[11px] space-y-1">
                     <div className="flex justify-between items-center text-sky-300 font-semibold">
-                      <span>{art.filename || art.artifact_ref.slice(0, 20) + '...'}</span>
-                      <span className="text-slate-400 text-[10px]">{art.size_bytes} bytes</span>
+                      <span className="truncate">{art.filename || art.artifact_ref.slice(0, 20)}</span>
+                      <span className="text-slate-400 text-[10px]">{art.size_bytes} B</span>
                     </div>
-                    <div className="text-slate-400 truncate">{art.artifact_ref}</div>
+                    <div className="text-slate-400 text-[10px] truncate">{art.artifact_ref}</div>
                     <div className="flex justify-between text-[10px] text-slate-500">
-                      <span>Projeto: {art.project} | Agente: {art.agent}</span>
+                      <span>{art.agent}</span>
                       <span>{art.created_at_utc?.slice(0, 19)}</span>
                     </div>
                   </div>
@@ -481,26 +597,22 @@ export default function HelpUSDevSuperAdminControlCenterPage() {
             </div>
           </div>
 
-          {/* Coluna 2: Histórico de Smart Patches */}
+          {/* Histórico de Patches */}
           <div className="space-y-2">
-            <h3 className="font-semibold text-slate-300">Histórico de Smart Patches com CAS</h3>
+            <h3 className="font-semibold text-slate-300">Smart Patches Aplicados</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto">
               {patches.length === 0 ? (
-                <div className="text-slate-500 italic p-3 bg-slate-950/40 rounded-lg">Nenhum patch aplicado recentemente.</div>
+                <div className="text-slate-500 italic p-3 bg-slate-950/40 rounded-xl text-xs">Nenhum patch aplicado recentemente.</div>
               ) : (
                 patches.map((pt: any) => (
-                  <div key={pt.patch_id} className="bg-slate-950/70 border border-slate-800 rounded-lg p-2.5 text-[11px] space-y-1">
+                  <div key={pt.patch_id} className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 text-[11px] space-y-1">
                     <div className="flex justify-between font-mono font-semibold">
-                      <span className="text-slate-200">{pt.patch_id}</span>
+                      <span className="text-slate-200 truncate">{pt.patch_id}</span>
                       <span className={`px-1.5 py-0.5 rounded text-[10px] ${pt.status === 'applied' ? 'bg-emerald-950 text-emerald-300' : 'bg-amber-950 text-amber-300'}`}>
                         {pt.status.toUpperCase()}
                       </span>
                     </div>
                     <div className="text-slate-400 font-mono text-[10px] truncate">{pt.file_path}</div>
-                    <div className="text-[10px] text-slate-500 flex justify-between font-mono">
-                      <span>CAS: {pt.expected_sha256?.slice(0, 8)}... → {pt.resulting_sha256?.slice(0, 8)}...</span>
-                      <span>{pt.applied_at_utc?.slice(0, 19)}</span>
-                    </div>
                   </div>
                 ))
               )}

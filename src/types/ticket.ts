@@ -25,6 +25,7 @@ export interface Message {
   ticketId: string;
   senderId: string;
   senderName: string;
+  senderEmail?: string;
   senderRole: 'client' | 'agent' | 'system';
   isInternalNote: boolean;
   content: string;

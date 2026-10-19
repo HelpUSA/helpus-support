@@ -240,6 +240,56 @@ export async function PATCH(
       return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
+    if (body.action === 'close') {
+      const existing = ticketStore.getTicketById(id) || body.ticketData;
+      if (!existing) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
+      if (!auth.isSuperAdmin) {
+        const isOwnerTenant = existing.tenantId === auth.tenantId || (auth.allowedTenantIds && auth.allowedTenantIds.includes(existing.tenantId));
+        if (!isOwnerTenant) {
+          return NextResponse.json(
+            { success: false, error: 'Acesso negado: você não tem permissão para encerrar chamados de outro tenant.' },
+            { status: 403, headers: ANTI_CACHE_HEADERS }
+          );
+        }
+      }
+      const updated = await ticketStore.closeTicketAsync(
+        id,
+        body.feedback || body.cancellationReason,
+        body.userName || (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente')
+      );
+      if (!updated) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
+      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+    }
+
+    if (body.action === 'reopen') {
+      const existing = ticketStore.getTicketById(id) || body.ticketData;
+      if (!existing) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
+      if (!auth.isSuperAdmin) {
+        const isOwnerTenant = existing.tenantId === auth.tenantId || (auth.allowedTenantIds && auth.allowedTenantIds.includes(existing.tenantId));
+        if (!isOwnerTenant) {
+          return NextResponse.json(
+            { success: false, error: 'Acesso negado: você não tem permissão para reabrir chamados de outro tenant.' },
+            { status: 403, headers: ANTI_CACHE_HEADERS }
+          );
+        }
+      }
+      const updated = await ticketStore.reopenTicketAsync(
+        id,
+        body.reason || 'Problema não totalmente sanado. Solicitando revisão.',
+        body.userName || (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente')
+      );
+      if (!updated) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
+      return NextResponse.json({ success: true, data: updated }, { status: 200, headers: ANTI_CACHE_HEADERS });
+    }
+
     if (body.status) {
       if (!isSuperAdminCaller && !auth.isSuperAdmin) {
         return NextResponse.json(
@@ -300,7 +350,7 @@ export async function POST(
       );
     }
 
-    const message = ticketStore.addMessage(id, {
+    const message = await ticketStore.addMessageAsync(id, {
       senderId: body.senderId || auth.userEmail || 'client',
       senderName: body.senderName || (auth.userEmail ? auth.userEmail.split('@')[0] : body.senderId),
       senderRole: body.senderRole || (auth.isSuperAdmin ? 'agent' : 'client'),

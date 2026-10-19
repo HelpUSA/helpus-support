@@ -29,8 +29,9 @@ import {
   Mail,
   Loader2,
   Building2,
+  MessageSquare,
 } from 'lucide-react';
-import { Ticket, TicketStatus, TicketCategory, TicketPriority, Attachment } from '@/types/ticket';
+import { Ticket, TicketStatus, TicketCategory, TicketPriority, Attachment, Message } from '@/types/ticket';
 import { AuthService, UserAccount, isAuthorizedSuperAdmin } from '@/lib/auth';
 import { INITIAL_TENANTS } from '@/lib/tenants';
 import { compressImage } from '@/lib/imageCompressor';
@@ -84,6 +85,17 @@ export default function ClientPortalPage() {
   // Privacy Modal
   const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [sendingEmailTicketId, setSendingEmailTicketId] = useState<string | null>(null);
+
+  // R26-06 Customer & Agent Journey States
+  const [statusFilterTab, setStatusFilterTab] = useState<'all' | 'pending' | 'in_progress' | 'resolved' | 'closed'>('all');
+  const [replyContent, setReplyContent] = useState('');
+  const [replyAttachments, setReplyAttachments] = useState<Attachment[]>([]);
+  const [replyIsInternal, setReplyIsInternal] = useState(false);
+  const [isSendingReply, setIsSendingReply] = useState(false);
+  const [isCloseModalOpen, setIsCloseModalOpen] = useState(false);
+  const [closeFeedback, setCloseFeedback] = useState('');
+  const [isReopenModalOpen, setIsReopenModalOpen] = useState(false);
+  const [reopenReason, setReopenReason] = useState('');
 
   const prevTicketsRef = useRef<Map<string, string>>(new Map());
   const prevProgressRef = useRef<Map<string, number>>(new Map());
@@ -585,6 +597,174 @@ export default function ClientPortalPage() {
     }
   };
 
+  const handleReplyFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const compressed = await compressImage(file, 1920, 1080, 0.8);
+        setReplyAttachments((prev) => [
+          ...prev,
+          {
+            id: compressed.id,
+            name: compressed.name,
+            url: compressed.dataUrl,
+            type: compressed.type,
+            size: compressed.compressedSize,
+          },
+        ]);
+      } catch (err) {
+        console.error('Erro na compressão do anexo de resposta', err);
+      }
+    }
+  };
+
+  const handleReplyPaste = async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          try {
+            const compressed = await compressImage(file, 1920, 1080, 0.8);
+            setReplyAttachments((prev) => [
+              ...prev,
+              {
+                id: compressed.id,
+                name: compressed.name,
+                url: compressed.dataUrl,
+                type: compressed.type,
+                size: compressed.compressedSize,
+              },
+            ]);
+            setStatusAlert('📸 Print colado e anexado com sucesso!');
+            setTimeout(() => setStatusAlert(null), 3000);
+          } catch (err) {
+            console.error('Erro ao colar imagem na resposta', err);
+          }
+        }
+      }
+    }
+  };
+
+  const handleSendReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTicket || (!replyContent.trim() && replyAttachments.length === 0)) return;
+
+    setIsSendingReply(true);
+    try {
+      const res = await fetch(`/api/tickets/${selectedTicket.id}`, {
+        method: 'POST',
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          senderId: user?.email || 'client',
+          senderName: user?.name || (user?.email ? user.email.split('@')[0] : 'Cliente'),
+          senderRole: isMasterUser ? 'agent' : 'client',
+          isInternalNote: isMasterUser ? replyIsInternal : false,
+          content: replyContent.trim(),
+          attachments: replyAttachments,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const newMsg: Message = data.data;
+        const updatedTicket: Ticket = {
+          ...selectedTicket,
+          messages: [...selectedTicket.messages, newMsg],
+          updatedAt: new Date().toISOString(),
+        };
+        setSelectedTicket(updatedTicket);
+        setTickets((prev) => prev.map((t) => (t.id === updatedTicket.id ? updatedTicket : t)));
+        setReplyContent('');
+        setReplyAttachments([]);
+        setStatusAlert('💬 Mensagem enviada com sucesso no chamado!');
+        setTimeout(() => setStatusAlert(null), 5000);
+      } else {
+        alert(data.error || 'Erro ao enviar mensagem');
+      }
+    } catch (e: any) {
+      console.error(e);
+      alert('Erro de conexão ao enviar mensagem');
+    } finally {
+      setIsSendingReply(false);
+    }
+  };
+
+  const handleCloseTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTicket) return;
+
+    setIsActionLoading(true);
+    try {
+      const res = await fetch(`/api/tickets/${selectedTicket.id}`, {
+        method: 'PATCH',
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'close',
+          feedback: closeFeedback.trim(),
+          userName: user?.name || user?.email,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const updatedTicket: Ticket = data.data;
+        setSelectedTicket(updatedTicket);
+        setTickets((prev) => prev.map((t) => (t.id === updatedTicket.id ? updatedTicket : t)));
+        setIsCloseModalOpen(false);
+        setCloseFeedback('');
+        setStatusAlert(`✅ Chamado [${updatedTicket.code}] encerrado com sucesso. Obrigado pelo feedback!`);
+        setTimeout(() => setStatusAlert(null), 6000);
+      } else {
+        alert(data.error || 'Erro ao encerrar chamado');
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
+  const handleReopenTicket = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedTicket || !reopenReason.trim()) return;
+
+    setIsActionLoading(true);
+    try {
+      const res = await fetch(`/api/tickets/${selectedTicket.id}`, {
+        method: 'PATCH',
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'reopen',
+          reason: reopenReason.trim(),
+          userName: user?.name || user?.email,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        const updatedTicket: Ticket = data.data;
+        setSelectedTicket(updatedTicket);
+        setTickets((prev) => prev.map((t) => (t.id === updatedTicket.id ? updatedTicket : t)));
+        setIsReopenModalOpen(false);
+        setReopenReason('');
+        setStatusAlert(`🔄 Chamado [${updatedTicket.code}] reaberto. A equipe técnica foi notificada.`);
+        setTimeout(() => setStatusAlert(null), 6000);
+      } else {
+        alert(data.error || 'Erro ao reabrir chamado');
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsActionLoading(false);
+    }
+  };
+
   const handleLogout = () => {
     AuthService.logout();
     window.location.href = '/';
@@ -602,14 +782,23 @@ export default function ClientPortalPage() {
     return t.id === (user.tenantId || 'publicarte');
   });
 
-  const filteredTickets = tickets.filter(
-    (t) =>
+  const filteredTickets = tickets.filter((t) => {
+    const matchesSearch =
       t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.description.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+      t.description.toLowerCase().includes(searchTerm.toLowerCase());
+    if (!matchesSearch) return false;
+
+    if (statusFilterTab === 'pending') return t.status === 'pending_approval';
+    if (statusFilterTab === 'in_progress') return t.status === 'in_production' || t.status === 'in_progress' || t.status === 'in_testing';
+    if (statusFilterTab === 'resolved') return t.status === 'resolved';
+    if (statusFilterTab === 'closed') return t.status === 'closed';
+    return true;
+  });
 
   const pendingCount = tickets.filter((t) => t.status === 'pending_approval').length;
+  const inProgressCount = tickets.filter((t) => t.status === 'in_production' || t.status === 'in_progress' || t.status === 'in_testing').length;
+  const resolvedCount = tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
 
   const handleSendTicketEmail = async (ticket: Ticket) => {
     try {
@@ -806,6 +995,50 @@ export default function ClientPortalPage() {
               onChange={(e) => setSearchTerm(e.target.value)}
               className="bg-transparent text-xs text-slate-200 placeholder-slate-500 focus:outline-none w-full"
             />
+          </div>
+
+          {/* Quick Filter Tabs */}
+          <div className="grid grid-cols-4 gap-1 p-1 bg-slate-950 rounded-xl border border-slate-800 text-[11px] font-semibold">
+            <button
+              onClick={() => setStatusFilterTab('all')}
+              className={`py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                statusFilterTab === 'all'
+                  ? 'bg-indigo-600 text-white font-bold shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              Todos ({tickets.length})
+            </button>
+            <button
+              onClick={() => setStatusFilterTab('pending')}
+              className={`py-1.5 rounded-lg transition-all text-center cursor-pointer relative ${
+                statusFilterTab === 'pending'
+                  ? 'bg-amber-600 text-white font-bold shadow'
+                  : 'text-slate-400 hover:text-amber-300'
+              }`}
+            >
+              Fila {pendingCount > 0 && <span className="ml-0.5 px-1 py-0.2 text-[9px] bg-amber-400 text-slate-950 font-black rounded-full">{pendingCount}</span>}
+            </button>
+            <button
+              onClick={() => setStatusFilterTab('in_progress')}
+              className={`py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                statusFilterTab === 'in_progress'
+                  ? 'bg-purple-600 text-white font-bold shadow'
+                  : 'text-slate-400 hover:text-purple-300'
+              }`}
+            >
+              Atend. {inProgressCount > 0 && <span className="ml-0.5 px-1 py-0.2 text-[9px] bg-purple-400 text-slate-950 font-black rounded-full">{inProgressCount}</span>}
+            </button>
+            <button
+              onClick={() => setStatusFilterTab('resolved')}
+              className={`py-1.5 rounded-lg transition-all text-center cursor-pointer ${
+                statusFilterTab === 'resolved'
+                  ? 'bg-emerald-600 text-white font-bold shadow'
+                  : 'text-slate-400 hover:text-emerald-300'
+              }`}
+            >
+              Feitos {resolvedCount > 0 && <span className="ml-0.5 px-1 py-0.2 text-[9px] bg-emerald-400 text-slate-950 font-black rounded-full">{resolvedCount}</span>}
+            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
@@ -1094,6 +1327,158 @@ export default function ClientPortalPage() {
                 </div>
               </div>
 
+              {/* 5-Step Visual Timeline Stepper */}
+              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-indigo-400" /> Linha do Tempo do Atendimento:
+                  </span>
+                  <span className="text-[11px] font-mono text-indigo-300 font-semibold">
+                    {getStatusLabel(selectedTicket.status)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-5 gap-1.5 text-center text-[10px] font-bold">
+                  {/* Step 1: Aberto */}
+                  <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                    <div className="flex items-center justify-center mb-0.5">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                    </div>
+                    <span>1. Aberto</span>
+                  </div>
+
+                  {/* Step 2: Aprovação Master */}
+                  <div
+                    className={`p-2 rounded-xl border ${
+                      selectedTicket.status === 'rejected'
+                        ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                        : selectedTicket.status === 'pending_approval'
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 animate-pulse'
+                        : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center mb-0.5">
+                      {selectedTicket.status === 'rejected' ? (
+                        <XCircle className="w-3.5 h-3.5" />
+                      ) : selectedTicket.status === 'pending_approval' ? (
+                        <Clock className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <span>2. Aprovação</span>
+                  </div>
+
+                  {/* Step 3: Atendimento / IA */}
+                  <div
+                    className={`p-2 rounded-xl border ${
+                      selectedTicket.status === 'in_production' || selectedTicket.status === 'in_progress'
+                        ? 'bg-purple-500/10 border-purple-500/30 text-purple-400 animate-pulse'
+                        : selectedTicket.status === 'resolved' || selectedTicket.status === 'closed'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center mb-0.5">
+                      {selectedTicket.status === 'in_production' || selectedTicket.status === 'in_progress' ? (
+                        <Cpu className="w-3.5 h-3.5 animate-spin" />
+                      ) : selectedTicket.status === 'resolved' || selectedTicket.status === 'closed' ? (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      ) : (
+                        <Clock className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <span>3. Execução</span>
+                  </div>
+
+                  {/* Step 4: Solucionado */}
+                  <div
+                    className={`p-2 rounded-xl border ${
+                      selectedTicket.status === 'resolved'
+                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 animate-bounce'
+                        : selectedTicket.status === 'closed'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center mb-0.5">
+                      {selectedTicket.status === 'resolved' || selectedTicket.status === 'closed' ? (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      ) : (
+                        <Clock className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <span>4. Solução</span>
+                  </div>
+
+                  {/* Step 5: Encerrado */}
+                  <div
+                    className={`p-2 rounded-xl border ${
+                      selectedTicket.status === 'closed'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : 'bg-slate-900 border-slate-800 text-slate-500'
+                    }`}
+                  >
+                    <div className="flex items-center justify-center mb-0.5">
+                      {selectedTicket.status === 'closed' ? (
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                      ) : (
+                        <Lock className="w-3.5 h-3.5" />
+                      )}
+                    </div>
+                    <span>5. Encerrado</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Client Resolution Confirmation Banner (When Resolved) */}
+              {selectedTicket.status === 'resolved' && (
+                <div className="p-4 bg-gradient-to-r from-emerald-950/70 via-teal-950/60 to-slate-950 border border-emerald-500/50 rounded-2xl space-y-3 shadow-lg">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-bold text-emerald-300 flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-emerald-400" />
+                      🎉 A equipe técnica solucionou sua solicitação!
+                    </span>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full font-bold border border-emerald-500/30">
+                      Aguardando Sua Validação
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-200 leading-relaxed">
+                    Por favor, valide se o ajuste atendeu sua expectativa. Caso esteja aprovado, clique em <strong>Confirmar Solução</strong> para encerrar o chamado. Se houver algum detalhe pendente, clique em <strong>Reabrir Chamado</strong>.
+                  </p>
+                  <div className="flex items-center gap-2.5 pt-1 flex-wrap">
+                    <button
+                      onClick={() => setIsCloseModalOpen(true)}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-900/30 cursor-pointer transition-all"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Confirmar Solução & Encerrar Chamado
+                    </button>
+                    <button
+                      onClick={() => setIsReopenModalOpen(true)}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 font-bold rounded-xl text-xs flex items-center gap-1.5 border border-amber-500/30 cursor-pointer transition-all"
+                    >
+                      <RefreshCw className="w-4 h-4" /> Problema Persiste / Reabrir Chamado
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Closed Banner with Reopen Option */}
+              {selectedTicket.status === 'closed' && (
+                <div className="p-3.5 bg-slate-900/60 border border-slate-700 rounded-2xl flex items-center justify-between text-xs flex-wrap gap-2">
+                  <div className="flex items-center gap-2 text-slate-300">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span>Chamado validado e encerrado. Caso necessite de nova revisão, você pode reabri-lo.</span>
+                  </div>
+                  <button
+                    onClick={() => setIsReopenModalOpen(true)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 flex items-center gap-1 cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" /> Reabrir Chamado
+                  </button>
+                </div>
+              )}
+
               {/* Master Decision Control Panel (Visible for HelpUS Master / SuperAdmin) */}
               {isMasterUser && selectedTicket.status !== 'closed' && (
                 <div className="p-4 bg-gradient-to-r from-purple-900/60 to-indigo-900/60 border border-purple-500/50 rounded-2xl space-y-3 shadow-xl">
@@ -1276,6 +1661,171 @@ export default function ClientPortalPage() {
                 )}
               </div>
 
+              {/* Box 3: Conversação & Interação em Tempo Real */}
+              <div className="p-4 bg-slate-950 border border-slate-800 rounded-2xl space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                  <span className="text-[11px] font-extrabold text-indigo-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <MessageSquare className="w-4 h-4 text-indigo-400" /> Histórico de Mensagens & Respostas
+                  </span>
+                  <span className="text-[10px] text-slate-400">
+                    {selectedTicket.messages.filter((m) => isMasterUser || !m.isInternalNote).length} mensagem(ns)
+                  </span>
+                </div>
+
+                {/* Messages List */}
+                <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1">
+                  {selectedTicket.messages.filter((m) => isMasterUser || !m.isInternalNote).length === 0 ? (
+                    <div className="p-4 bg-slate-900/40 rounded-xl text-center text-xs text-slate-500 italic">
+                      Nenhuma mensagem adicional registrada ainda. Você pode enviar uma resposta abaixo.
+                    </div>
+                  ) : (
+                    selectedTicket.messages
+                      .filter((m) => isMasterUser || !m.isInternalNote)
+                      .map((m) => {
+                        const isFromClient = m.senderRole === 'client' || m.senderEmail === selectedTicket.createdByEmail;
+                        const isSystem = m.senderRole === 'system';
+                        return (
+                          <div
+                            key={m.id}
+                            className={`p-3 rounded-xl text-xs space-y-1.5 border transition-all ${
+                              m.isInternalNote
+                                ? 'bg-amber-950/30 border-amber-500/40 text-amber-100'
+                                : isFromClient
+                                ? 'bg-slate-900/90 border-slate-800 text-slate-200'
+                                : isSystem
+                                ? 'bg-slate-950 border-slate-800/80 text-slate-400'
+                                : 'bg-indigo-950/40 border-indigo-500/30 text-indigo-100'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-[11px] border-b border-slate-800/60 pb-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold flex items-center gap-1">
+                                  {m.isInternalNote ? (
+                                    <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-mono text-[10px]">
+                                      🔒 Nota Interna
+                                    </span>
+                                  ) : isFromClient ? (
+                                    <span className="text-slate-300">👤 {m.senderName}</span>
+                                  ) : isSystem ? (
+                                    <span className="text-slate-400">⚙️ Sistema HelpUS</span>
+                                  ) : (
+                                    <span className="text-indigo-300">🛡️ {m.senderName} (Suporte)</span>
+                                  )}
+                                </span>
+                                {m.senderEmail && (
+                                  <span className="text-[10px] text-slate-500">({m.senderEmail})</span>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-500 font-mono">
+                                {new Date(m.createdAt).toLocaleString('pt-BR')}
+                              </span>
+                            </div>
+                            <p className="whitespace-pre-wrap leading-relaxed text-slate-200">{m.content}</p>
+
+                            {m.attachments && m.attachments.length > 0 && (
+                              <div className="pt-2 flex flex-wrap gap-2 border-t border-slate-800/60">
+                                {m.attachments.map((att) => (
+                                  <a key={att.id} href={att.url} target="_blank" rel="noreferrer" className="group">
+                                    <img
+                                      src={att.url}
+                                      alt={att.name}
+                                      className="h-20 rounded-lg object-cover border border-slate-700 group-hover:border-indigo-400 transition-all"
+                                    />
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+
+                {/* Interactive Reply Form */}
+                <form onSubmit={handleSendReply} className="space-y-2.5 pt-2 border-t border-slate-800">
+                  {/* Quick Reply Templates for Support/Master */}
+                  {isMasterUser && (
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] text-slate-400 font-semibold">Respostas Rápidas:</span>
+                      {[
+                        'Recebido e em análise técnica.',
+                        'Alteração implantada. Por favor, valide em sua loja.',
+                        'Aguardando seu retorno com mais detalhes.',
+                      ].map((template) => (
+                        <button
+                          key={template}
+                          type="button"
+                          onClick={() => setReplyContent((prev) => (prev ? `${prev} ${template}` : template))}
+                          className="px-2 py-0.5 bg-slate-900 hover:bg-indigo-950/60 border border-slate-800 hover:border-indigo-500/40 text-[10px] text-slate-300 rounded-lg transition-all cursor-pointer"
+                        >
+                          + {template}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <div>
+                    <textarea
+                      rows={3}
+                      placeholder="Escreva sua resposta (Ctrl+V para colar capturas de tela diretamente)..."
+                      value={replyContent}
+                      onChange={(e) => setReplyContent(e.target.value)}
+                      onPaste={handleReplyPaste}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 text-xs"
+                    />
+                  </div>
+
+                  {/* Attachments Preview */}
+                  {replyAttachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {replyAttachments.map((att) => (
+                        <div key={att.id} className="relative group">
+                          <img src={att.url} alt={att.name} className="h-16 w-20 object-cover rounded-lg border border-slate-700" />
+                          <button
+                            type="button"
+                            onClick={() => setReplyAttachments((prev) => prev.filter((a) => a.id !== att.id))}
+                            className="absolute top-1 right-1 p-0.5 bg-red-600 text-white rounded cursor-pointer"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <label className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-semibold rounded-xl flex items-center gap-1.5 cursor-pointer transition-all">
+                        <Paperclip className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Anexar Imagem</span>
+                        <input type="file" accept="image/*" onChange={handleReplyFileUpload} className="hidden" />
+                      </label>
+
+                      {isMasterUser && (
+                        <label className="flex items-center gap-1.5 text-xs text-amber-300 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={replyIsInternal}
+                            onChange={(e) => setReplyIsInternal(e.target.checked)}
+                            className="rounded border-slate-700 text-amber-500 focus:ring-0"
+                          />
+                          <span>Nota Interna (oculta para cliente)</span>
+                        </label>
+                      )}
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={isSendingReply || (!replyContent.trim() && replyAttachments.length === 0)}
+                      className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg text-xs flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-40"
+                    >
+                      {isSendingReply ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                      {isSendingReply ? 'Enviando...' : 'Enviar Resposta'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+
               {/* Status Footer Alert */}
               <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl flex items-center justify-between text-xs text-slate-300">
                 <div className="flex items-center gap-2">
@@ -1293,168 +1843,102 @@ export default function ClientPortalPage() {
         </div>
       </main>
 
-      {/* New Ticket Modal Overlay */}
-      {isCreatingNew && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/85 backdrop-blur-md animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-800 w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
-              <div>
-                <h2 className="text-base font-extrabold text-white flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-indigo-400" />
-                  Nova Solicitação — {isMasterUser ? 'SuperAdmin Master' : (user.tenantName || 'Public Arte')}
-                </h2>
-                <p className="text-xs text-slate-400">Descreva sua solicitação. O Administrador HelpUS será notificado instantaneamente.</p>
-              </div>
-              <button
-                onClick={() => setIsCreatingNew(false)}
-                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
+      {/* Close Ticket Modal (Client Resolution Confirmation) */}
+      {isCloseModalOpen && selectedTicket && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden text-slate-100 space-y-4 p-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-bold text-sm text-emerald-400 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4" /> Confirmar e Encerrar Chamado [{selectedTicket.code}]
+              </h3>
+              <button onClick={() => setIsCloseModalOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateTicket} className="p-6 overflow-y-auto space-y-4 text-xs flex-1">
-              {isMasterUser ? (
-                <div className="bg-indigo-950/40 p-3.5 rounded-xl border border-indigo-500/30 space-y-1.5">
-                  <label className="block text-indigo-300 font-semibold flex items-center justify-between">
-                    <span className="flex items-center gap-1.5"><Building2 className="w-4 h-4 text-indigo-400" /> Empresa / Aplicação do Cliente Alvo</span>
-                    <span className="text-[10px] text-slate-400 font-normal">SuperAdmin: Escolha qual empresa receberá a solicitação</span>
-                  </label>
-                  <select
-                    value={targetTenantId}
-                    onChange={(e) => setTargetTenantId(e.target.value)}
-                    className="w-full bg-slate-950 border border-indigo-500/50 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:border-indigo-400 font-bold text-xs cursor-pointer shadow-inner"
-                  >
-                    {INITIAL_TENANTS.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        🏢 {t.name} ({t.domain})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ) : (
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between text-slate-300">
-                  <span className="flex items-center gap-2 font-semibold">
-                    <Building2 className="w-4 h-4 text-indigo-400" /> Empresa Solicitante:
-                  </span>
-                  <span className="font-bold text-indigo-300 bg-indigo-500/10 px-3 py-1 rounded-lg border border-indigo-500/20">
-                    🏢 {user.tenantName || 'Public Arte'} ({user.tenantId || 'publicarte'}.helpusbr.com)
-                  </span>
-                </div>
-              )}
+            <form onSubmit={handleCloseTicket} className="space-y-3 text-xs">
+              <p className="text-slate-300">
+                Você confirma que a solução apresentada atendeu sua solicitação? Você pode deixar um comentário ou avaliação opcional:
+              </p>
 
               <div>
-                <label className="block text-slate-300 mb-1 font-semibold">Assunto / Título Resumido *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: Alterar a imagem do produto para uma xícara com visão lateral..."
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500 font-medium"
+                <label className="block text-slate-400 mb-1 font-medium">Feedback / Avaliação (Opcional)</label>
+                <textarea
+                  rows={3}
+                  placeholder="Ex: Tudo funcionando perfeitamente, obrigado pela agilidade!"
+                  value={closeFeedback}
+                  onChange={(e) => setCloseFeedback(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-emerald-500 text-xs"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-300 mb-1 font-semibold">Tipo de Solicitação</label>
-                  <select
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value as TicketCategory)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none focus:border-indigo-500 cursor-pointer"
-                  >
-                    <option value="support">🛠️ Suporte Técnico Geral</option>
-                    <option value="bug">🐞 Correção de Erro / Bug</option>
-                    <option value="feature">🚀 Pedido de Nova Funcionalidade</option>
-                    <option value="question">❓ Dúvida sobre o Sistema</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 mb-1 font-semibold">Prioridade</label>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {(['low', 'medium', 'high', 'urgent'] as TicketPriority[]).map((p) => (
-                      <button
-                        type="button"
-                        key={p}
-                        onClick={() => setPriority(p)}
-                        className={`py-2 rounded-xl font-bold text-[11px] border text-center transition-all cursor-pointer ${
-                          priority === p
-                            ? 'bg-indigo-600/20 border-indigo-500 text-indigo-300 shadow-md'
-                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                        }`}
-                      >
-                        {p === 'low' && 'Baixa'}
-                        {p === 'medium' && 'Média'}
-                        {p === 'high' && 'Alta'}
-                        {p === 'urgent' && 'Urgente'}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCloseModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold rounded-xl text-xs cursor-pointer"
+                >
+                  Voltar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isActionLoading}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg text-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  {isActionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Confirmar Encerramento
+                </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Reopen Ticket Modal (Client / Agent Reopen) */}
+      {isReopenModalOpen && selectedTicket && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden text-slate-100 space-y-4 p-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-bold text-sm text-amber-400 flex items-center gap-2">
+                <RefreshCw className="w-4 h-4" /> Reabrir Chamado [{selectedTicket.code}]
+              </h3>
+              <button onClick={() => setIsReopenModalOpen(false)} className="text-slate-400 hover:text-white cursor-pointer">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleReopenTicket} className="space-y-3 text-xs">
+              <p className="text-slate-300">
+                Por favor, descreva o motivo da reabertura e o que ainda precisa de ajuste:
+              </p>
 
               <div>
-                <label className="block text-slate-300 mb-1 font-semibold">Descrição Detalhada da Necessidade *</label>
+                <label className="block text-slate-400 mb-1 font-medium">Motivo da Reabertura *</label>
                 <textarea
                   required
                   rows={4}
-                  placeholder="Cole prints com Ctrl+V ou descreva com detalhes o que precisa alterar no sistema..."
-                  value={description}
-                  onPaste={handlePaste}
-                  onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                  placeholder="Ex: O botão foi ajustado mas ainda não está salvando no mobile..."
+                  value={reopenReason}
+                  onChange={(e) => setReopenReason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-amber-500 text-xs"
                 />
               </div>
 
-              <div className="p-3.5 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-slate-300 flex items-center gap-1.5">
-                    <Paperclip className="w-4 h-4 text-indigo-400" /> Anexar ou Colar Imagens (Ctrl+V)
-                  </span>
-                  <label className="px-3 py-1 bg-indigo-600/20 border border-indigo-500/30 text-indigo-300 text-xs font-bold rounded-lg hover:bg-indigo-600/30 transition-all cursor-pointer">
-                    Anexar Arquivo
-                    <input type="file" accept="image/*" onChange={(e) => handleFileUpload(e)} className="hidden" />
-                  </label>
-                </div>
-
-                {attachments.length > 0 && (
-                  <div className="grid grid-cols-4 gap-2 pt-2">
-                    {attachments.map((att) => (
-                      <div key={att.id} className="relative group">
-                        <img src={att.url} alt={att.name} className="w-full h-20 object-cover rounded-xl border border-slate-700" />
-                        <button
-                          type="button"
-                          onClick={() => setAttachments((prev) => prev.filter((a) => a.id !== att.id))}
-                          className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-md opacity-0 group-hover:opacity-100 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+              <div className="flex items-center justify-end gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setIsCreatingNew(false)}
-                  className="px-4 py-2.5 bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold rounded-xl text-xs cursor-pointer transition-colors"
+                  onClick={() => setIsReopenModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 text-slate-300 hover:bg-slate-700 font-semibold rounded-xl text-xs cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting}
-                  className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 text-xs flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                  disabled={isActionLoading || !reopenReason.trim()}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl shadow-lg text-xs flex items-center gap-1.5 cursor-pointer"
                 >
-                  {isSubmitting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Send className="w-4 h-4" />
-                  )}
-                  {isSubmitting ? 'Enviando...' : 'Enviar Solicitação para Análise & Aprovação'}
+                  {isActionLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                  Confirmar Reabertura
                 </button>
               </div>
             </form>

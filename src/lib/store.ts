@@ -1177,6 +1177,74 @@ class TicketStore {
     }
     return ticket;
   }
+
+  async addMessageAsync(
+    ticketId: string,
+    message: {
+      senderId: string;
+      senderName: string;
+      senderRole: 'client' | 'agent' | 'system';
+      isInternalNote: boolean;
+      content: string;
+      attachments?: Attachment[];
+    }
+  ): Promise<Message | undefined> {
+    const msg = this.addMessage(ticketId, message);
+    if (msg) {
+      await this.saveAsync();
+    }
+    return msg;
+  }
+
+  async closeTicketAsync(id: string, clientFeedback?: string, closedByName?: string): Promise<Ticket | undefined> {
+    const ticket = this.getTicketById(id);
+    if (!ticket) return undefined;
+
+    ticket.status = 'closed';
+    ticket.updatedAt = new Date().toISOString();
+
+    const closeMsg = clientFeedback
+      ? `✅ *Chamado Concluído & Encerrado pelo Cliente (${closedByName || 'Cliente'})*\n\nAvaliação / Feedback: ${clientFeedback}`
+      : `✅ *Chamado Concluído & Encerrado com Sucesso pelo Cliente (${closedByName || 'Cliente'})*`;
+
+    ticket.messages.push({
+      id: `msg-${Date.now()}`,
+      ticketId: ticket.id,
+      senderId: ticket.createdByEmail,
+      senderName: closedByName || 'Cliente',
+      senderRole: 'client',
+      isInternalNote: false,
+      content: closeMsg,
+      createdAt: new Date().toISOString(),
+    });
+
+    await this.saveAsync();
+    return ticket;
+  }
+
+  async reopenTicketAsync(id: string, reason: string, reopenedByName?: string): Promise<Ticket | undefined> {
+    const ticket = this.getTicketById(id);
+    if (!ticket) return undefined;
+
+    ticket.status = 'in_progress';
+    ticket.updatedAt = new Date().toISOString();
+
+    const reopenMsg = `🔄 *Chamado Reaberto pelo Cliente (${reopenedByName || 'Cliente'})*\n\nMotivo da Reabertura: ${reason}`;
+
+    ticket.messages.push({
+      id: `msg-${Date.now()}`,
+      ticketId: ticket.id,
+      senderId: ticket.createdByEmail,
+      senderName: reopenedByName || 'Cliente',
+      senderRole: 'client',
+      isInternalNote: false,
+      content: reopenMsg,
+      createdAt: new Date().toISOString(),
+    });
+
+    await this.saveAsync();
+    return ticket;
+  }
 }
 
 export const ticketStore = new TicketStore();

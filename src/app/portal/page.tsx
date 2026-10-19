@@ -31,7 +31,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { Ticket, TicketStatus, TicketCategory, TicketPriority, Attachment } from '@/types/ticket';
-import { AuthService, UserAccount } from '@/lib/auth';
+import { AuthService, UserAccount, isAuthorizedSuperAdmin } from '@/lib/auth';
 import { INITIAL_TENANTS } from '@/lib/tenants';
 import { compressImage } from '@/lib/imageCompressor';
 import { generateTicketPDFReport } from '@/lib/pdfGenerator';
@@ -520,8 +520,8 @@ export default function ClientPortalPage() {
     window.location.href = '/';
   };
 
-  const isMasterUser = user?.role === 'super_admin' || user?.email === 'helpus.ecommerce@gmail.com' || user?.email === 'wagner.redes@gmail.com';
-  const isSuperAdmin = user?.role === 'super_admin' || user?.email === 'helpus.ecommerce@gmail.com' || user?.email === 'wagner.redes@gmail.com';
+  const isMasterUser = Boolean(user && isAuthorizedSuperAdmin(user));
+  const isSuperAdmin = Boolean(user && isAuthorizedSuperAdmin(user));
 
   const availableTenants = INITIAL_TENANTS.filter((t) => {
     if (!user) return false;

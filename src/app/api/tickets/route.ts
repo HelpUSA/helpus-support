@@ -1,14 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ticketStore } from '@/lib/store';
+import { validateServerApiAccess } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const tenantId = searchParams.get('tenantId') || undefined;
+  const requestedTenant = searchParams.get('tenantId') || undefined;
   
-  const tickets = await ticketStore.getTicketsAsync(tenantId);
+  const auth = validateServerApiAccess(request.headers);
+
+  // Cross-Tenant Isolation Guard:
+  // Non-SuperAdmin callers cannot query or view other tenants' tickets.
+  let effectiveTenant = requestedTenant;
+  if (!auth.isSuperAdmin && auth.authenticated && auth.tenantId && auth.tenantId !== 'all') {
+    if (!requestedTenant || (auth.allowedTenantIds && !auth.allowedTenantIds.includes(requestedTenant))) {
+      effectiveTenant = auth.tenantId;
+    }
+  }
+
+  const tickets = await ticketStore.getTicketsAsync(effectiveTenant);
   return NextResponse.json({ success: true, version: 'v_2026_10_04_v2', count: tickets.length, data: tickets });
 }
 

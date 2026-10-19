@@ -112,6 +112,80 @@ export const INITIAL_USERS: UserAccount[] = [
   },
 ];
 
+export const AUTHORIZED_SUPERADMIN_EMAILS = [
+  'helpus.ecommerce@gmail.com',
+  'wagner.redes@gmail.com',
+] as const;
+
+export const AUTHORIZED_SUPERADMIN_IDS = [
+  'usr-helpus-master',
+  'usr-wagner',
+] as const;
+
+export function isAuthorizedSuperAdmin(user?: Partial<UserAccount> | null): boolean {
+  if (!user || !user.email || !user.role) return false;
+  const cleanEmail = user.email.toLowerCase().trim();
+  const cleanRole = user.role;
+  const isSuperAdminEmail = (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).includes(cleanEmail);
+  const isSuperAdminId = user.id ? (AUTHORIZED_SUPERADMIN_IDS as readonly string[]).includes(user.id) : true;
+  return cleanRole === 'super_admin' && isSuperAdminEmail && isSuperAdminId && user.status !== 'suspended';
+}
+
+export interface ServerAuthDecision {
+  authenticated: boolean;
+  isSuperAdmin: boolean;
+  userEmail?: string;
+  userId?: string;
+  tenantId?: string;
+  allowedTenantIds?: string[];
+  error?: string;
+}
+
+export function validateServerApiAccess(headers: { get(name: string): string | null }): ServerAuthDecision {
+  const emailHeader = (headers.get('x-user-email') || '').toLowerCase().trim();
+  const roleHeader = headers.get('x-user-role') || '';
+  const tenantHeader = headers.get('x-tenant-id') || '';
+
+  const isSuperAdminEmail = (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).includes(emailHeader);
+
+  if (isSuperAdminEmail && roleHeader === 'super_admin') {
+    return {
+      authenticated: true,
+      isSuperAdmin: true,
+      userEmail: emailHeader,
+      tenantId: 'all',
+      allowedTenantIds: ['all'],
+    };
+  }
+
+  if (emailHeader) {
+    const knownUser = INITIAL_USERS.find((u) => u.email.toLowerCase() === emailHeader);
+    if (knownUser && knownUser.status !== 'suspended') {
+      return {
+        authenticated: true,
+        isSuperAdmin: knownUser.role === 'super_admin' && isAuthorizedSuperAdmin(knownUser),
+        userEmail: knownUser.email,
+        userId: knownUser.id,
+        tenantId: knownUser.tenantId || tenantHeader,
+        allowedTenantIds: knownUser.allowedTenantIds,
+      };
+    }
+    return {
+      authenticated: true,
+      isSuperAdmin: false,
+      userEmail: emailHeader,
+      tenantId: tenantHeader || 'publicarte',
+      allowedTenantIds: [tenantHeader || 'publicarte'],
+    };
+  }
+
+  return {
+    authenticated: false,
+    isSuperAdmin: false,
+    error: 'unauthenticated_missing_user_headers',
+  };
+}
+
 const AUTH_STORAGE_KEY = 'helpus_auth_user_v2';
 const USERS_REGISTRY_KEY = 'helpus_users_registry_v2';
 
@@ -152,6 +226,12 @@ export class AuthService {
   }
 
   static updateUser(user: UserAccount): UserAccount[] {
+    // Anti-Privilege Escalation Guard:
+    // Only authorized superadmin accounts can hold or receive super_admin role.
+    if (user.role === 'super_admin' && !isAuthorizedSuperAdmin(user)) {
+      console.warn('[Security Guard] Attempt to assign super_admin role to unauthorized account rejected:', user.email);
+      user.role = 'client_user';
+    }
     const currentList = AuthService.getUsers();
     const index = currentList.findIndex((u) => u.id === user.id || u.email.toLowerCase() === user.email.toLowerCase());
     let updatedList: UserAccount[];
@@ -232,7 +312,20 @@ export class AuthService {
     const stored = localStorage.getItem(AUTH_STORAGE_KEY);
     if (!stored) return null;
     try {
-      return JSON.parse(stored);
+      const parsed: UserAccount = JSON.parse(stored);
+      if (!parsed || typeof parsed !== 'object') return null;
+
+      // Anti-Privilege Escalation Guard:
+      // If client-side localStorage was manipulated to declare role: 'super_admin',
+      // strictly verify against authoritative server list. If unauthorized, sanitize and demote.
+      if (parsed.role === 'super_admin' && !isAuthorizedSuperAdmin(parsed)) {
+        console.warn('[Security Guard] Unauthorized SuperAdmin escalation detected in localStorage. Demoting to client_user.');
+        parsed.role = 'client_user';
+        parsed.allowedTenantIds = [parsed.tenantId || 'publicarte'];
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(parsed));
+      }
+
+      return parsed;
     } catch {
       return null;
     }

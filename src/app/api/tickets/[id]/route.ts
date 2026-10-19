@@ -2,6 +2,7 @@ import { NextRequest, NextResponse, after } from 'next/server';
 import { ticketStore } from '@/lib/store';
 import { aiAutoCodingWorker } from '@/lib/aiWorker';
 import { getAutoResolutionDetails } from '@/lib/aiResolver';
+import { validateServerApiAccess, AUTHORIZED_SUPERADMIN_EMAILS } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -51,19 +52,18 @@ export async function PATCH(
       return NextResponse.json({ success: true, data: updated });
     }
 
-    if (body.action === 'approve') {
-      const agentName = body.agentName || 'HelpUS Master';
-      const agentEmail = body.agentEmail || body.userEmail || '';
-      
-      // Strict Server-Side Permission Check: Only Master SuperAdmin can approve tickets
-      const isAllowedMaster = agentName === 'HelpUS Master' || 
-                              agentEmail === 'helpus.ecommerce@gmail.com' || 
-                              agentEmail === 'wagner.redes@gmail.com' ||
-                              !agentName.includes('Eduardo');
+    const auth = validateServerApiAccess(request.headers);
+    const callerEmail = (body.agentEmail || body.userEmail || auth.userEmail || '').toLowerCase().trim();
+    const isSuperAdminCaller = (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).includes(callerEmail) && 
+                               (auth.isSuperAdmin || request.headers.get('x-user-role') === 'super_admin' || body.secretToken === process.env.SUPERADMIN_SECRET);
 
-      if (!isAllowedMaster) {
+    if (body.action === 'approve') {
+      // Strict Server-Side Permission Check:
+      // Only authenticated Master SuperAdmin with matching verified email can approve tickets.
+      // Eliminates insecure name defaults and '!agentName.includes("Eduardo")' bypass.
+      if (!isSuperAdminCaller) {
         return NextResponse.json(
-          { success: false, error: 'Aprovação negada: Apenas o Administrador Master HelpUS pode autorizar chamados.' },
+          { success: false, error: 'Aprovação negada: Apenas o Administrador Master HelpUS autenticado pode autorizar chamados.' },
           { status: 403 }
         );
       }
@@ -82,6 +82,12 @@ export async function PATCH(
     }
 
     if (body.action === 'complete' || body.action === 'resolve') {
+      if (!isSuperAdminCaller && !auth.authenticated) {
+        return NextResponse.json(
+          { success: false, error: 'Operação negada: Permissão de agente ou SuperAdmin necessária para concluir chamados.' },
+          { status: 403 }
+        );
+      }
       const updated = await ticketStore.completeTicketProductionAsync(id, {
         success: true,
         solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
@@ -93,13 +99,19 @@ export async function PATCH(
     }
 
     if (body.action === 'reject') {
+      if (!isSuperAdminCaller) {
+        return NextResponse.json(
+          { success: false, error: 'Operação negada: Apenas o Administrador Master HelpUS pode recusar chamados.' },
+          { status: 403 }
+        );
+      }
       if (!body.rejectionReason) {
         return NextResponse.json({ success: false, error: 'Motivo da recusa é obrigatório' }, { status: 400 });
       }
       const updated = await ticketStore.rejectTicketAsync(
         id,
         body.rejectionReason,
-        body.agentName || 'HelpUS Master',
+        'HelpUS Master SuperAdmin',
         body.ticketData
       );
       if (!updated) {

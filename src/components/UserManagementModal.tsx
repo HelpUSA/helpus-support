@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, ShieldCheck, UserCheck, Plus, Trash2, Edit3, Search, CheckCircle2, XCircle, Building2, Check, Lock, Sparkles } from 'lucide-react';
-import { AuthService, UserAccount, UserRole } from '@/lib/auth';
+import { AuthService, UserAccount, UserRole, isAuthorizedSuperAdmin } from '@/lib/auth';
 import { INITIAL_TENANTS } from '@/lib/tenants';
 
 interface UserManagementModalProps {
@@ -46,7 +46,7 @@ export default function UserManagementModal({ isOpen, onClose, currentUser }: Us
     setUsers(list);
   };
 
-  if (!isOpen) return null;
+  if (!isOpen || !isAuthorizedSuperAdmin(currentUser)) return null;
 
   const handleStartAdd = () => {
     setEditingUser(null);

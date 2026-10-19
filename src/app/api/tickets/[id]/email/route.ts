@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ticketStore } from '@/lib/store';
 import { emailService } from '@/lib/emailService';
+import { validateServerApiAccess } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
+
+const ANTI_CACHE_HEADERS = {
+  'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, private',
+  'Pragma': 'no-cache',
+  'Vary': 'Authorization, x-user-email, x-tenant-id, x-user-role',
+};
 
 export async function POST(
   request: NextRequest,
@@ -11,11 +18,31 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const auth = validateServerApiAccess(request.headers);
+
+    if (!auth.authenticated) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized: autenticação necessária para enviar notificações de e-mail.' },
+        { status: 401, headers: ANTI_CACHE_HEADERS }
+      );
+    }
+
     await ticketStore.getTicketsAsync();
     const ticket = ticketStore.getTicketById(id);
 
     if (!ticket) {
-      return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404 });
+      return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+    }
+
+    if (!auth.isSuperAdmin) {
+      const isTenantMatch = ticket.tenantId === auth.tenantId ||
+                            (auth.allowedTenantIds && auth.allowedTenantIds.includes(ticket.tenantId));
+      if (!isTenantMatch) {
+        return NextResponse.json(
+          { success: false, error: 'Acesso negado: este chamado pertence a outro tenant.' },
+          { status: 403, headers: ANTI_CACHE_HEADERS }
+        );
+      }
     }
 
     const body = await request.json().catch(() => ({}));

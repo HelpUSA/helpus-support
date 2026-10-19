@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import https from 'https';
 import { Ticket, Tenant, Message, Attachment } from '@/types/ticket';
 import { INITIAL_TENANTS } from '@/lib/tenants';
@@ -418,12 +419,74 @@ class TicketStore {
     this.load();
   }
 
-  private getStoragePath() {
+  private writeQueue: Promise<void> = Promise.resolve();
+
+  private getStoragePath(): string {
+    if (process.env.HELPUS_DB_FILE) {
+      return process.env.HELPUS_DB_FILE;
+    }
+
     try {
-      const tmpDir = process.env.TMPDIR || '/tmp';
-      return path.join(tmpDir, 'helpus_tickets_cache_v2.json');
+      // 1. Prioridade: arquivo persistente na raiz do projeto
+      const projectRootPath = path.join(process.cwd(), 'helpus_tickets_cache_v2.json');
+      const dir = path.dirname(projectRootPath);
+      if (fs.existsSync(dir)) {
+        return projectRootPath;
+      }
+    } catch {}
+
+    try {
+      // 2. Fallback multiplataforma (Windows: %TEMP%, Unix: TMPDIR ou /tmp)
+      const systemTmp = os.tmpdir() || process.env.TMPDIR || process.env.TEMP || '/tmp';
+      if (!fs.existsSync(systemTmp)) {
+        fs.mkdirSync(systemTmp, { recursive: true });
+      }
+      return path.join(systemTmp, 'helpus_tickets_cache_v2.json');
     } catch {
       return path.join(process.cwd(), 'helpus_tickets_cache_v2.json');
+    }
+  }
+
+  private atomicSaveSync(filePath: string, tickets: Ticket[]): boolean {
+    const dir = path.dirname(filePath);
+    if (!fs.existsSync(dir)) {
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch (err) {
+        console.error('Failed to create storage directory:', err);
+        return false;
+      }
+    }
+
+    const jsonContent = JSON.stringify(tickets, null, 2);
+    const tempPath = `${filePath}.tmp.${Date.now()}.${Math.random().toString(36).substring(2, 7)}`;
+    const backupPath = `${filePath}.bak`;
+
+    try {
+      // 1. Escrita atômica em arquivo temporário
+      fs.writeFileSync(tempPath, jsonContent, 'utf-8');
+
+      // 2. Rotação do arquivo atual para backup seguro
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.copyFileSync(filePath, backupPath);
+        } catch (bakErr) {
+          console.warn('Backup copy rotation warning:', bakErr);
+        }
+      }
+
+      // 3. Substituição atômica (renameSync com fallback de cópia para Windows)
+      try {
+        fs.renameSync(tempPath, filePath);
+      } catch {
+        fs.copyFileSync(tempPath, filePath);
+        try { fs.unlinkSync(tempPath); } catch {}
+      }
+      return true;
+    } catch (err) {
+      console.error('Atomic write failed in atomicSaveSync:', err);
+      try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+      return false;
     }
   }
 
@@ -434,18 +497,50 @@ class TicketStore {
         try {
           this.tickets = JSON.parse(savedTickets);
         } catch (e) {
-          console.error('Error parsing stored tickets', e);
+          console.error('Error parsing stored tickets in browser', e);
         }
       }
     } else {
-      try {
-        const filePath = this.getStoragePath();
-        if (fs.existsSync(filePath)) {
+      const filePath = this.getStoragePath();
+      const backupPath = `${filePath}.bak`;
+      let loaded = false;
+
+      // 1. Tentativa de carga do arquivo primário
+      if (fs.existsSync(filePath)) {
+        try {
           const content = fs.readFileSync(filePath, 'utf-8');
-          this.tickets = JSON.parse(content);
+          const parsed = JSON.parse(content);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.tickets = parsed;
+            loaded = true;
+          }
+        } catch (parseErr) {
+          console.error('[Persistence] Arquivo primário corrompido, acionando auto-recuperação do backup:', parseErr);
         }
-      } catch (e) {
-        console.error('Server storage load error', e);
+      }
+
+      // 2. Auto-recuperação através do backup se o primário falhou ou está corrompido
+      if (!loaded && fs.existsSync(backupPath)) {
+        try {
+          const bakContent = fs.readFileSync(backupPath, 'utf-8');
+          const parsedBak = JSON.parse(bakContent);
+          if (Array.isArray(parsedBak) && parsedBak.length > 0) {
+            this.tickets = parsedBak;
+            console.log('[Persistence] Chamados restaurados com sucesso a partir do backup:', backupPath);
+            loaded = true;
+            try { fs.copyFileSync(backupPath, filePath); } catch {}
+          }
+        } catch (bakErr) {
+          console.error('[Persistence] Falha ao ler cópia de backup:', bakErr);
+        }
+      }
+
+      // 3. Fallback inicial para INITIAL_TICKETS se nada foi carregado
+      if (!loaded) {
+        this.tickets = INITIAL_TICKETS;
+        try {
+          this.atomicSaveSync(filePath, this.tickets);
+        } catch {}
       }
     }
   }
@@ -456,7 +551,7 @@ class TicketStore {
     } else {
       try {
         const filePath = this.getStoragePath();
-        fs.writeFileSync(filePath, JSON.stringify(this.tickets, null, 2), 'utf-8');
+        this.atomicSaveSync(filePath, this.tickets);
       } catch (e) {
         console.error('Server storage save error', e);
       }
@@ -467,20 +562,30 @@ class TicketStore {
     if (typeof window !== 'undefined') {
       localStorage.setItem('helpus_tickets_v1', JSON.stringify(this.tickets));
       return { success: true };
-    } else {
-      try {
-        const filePath = this.getStoragePath();
-        fs.writeFileSync(filePath, JSON.stringify(this.tickets, null, 2), 'utf-8');
-      } catch (e) {
-        console.error('Server storage save error', e);
-      }
-      try {
-        return await saveGitHubTickets(this.tickets);
-      } catch (err: any) {
-        console.error('Cloud save failed in saveAsync', err);
-        return { success: false, error: err?.message || String(err) };
-      }
     }
+
+    // Fila sequencial (Mutex) para impedir condições de corrida entre escritas concorrentes
+    return new Promise((resolve) => {
+      this.writeQueue = this.writeQueue.then(async () => {
+        try {
+          const filePath = this.getStoragePath();
+          const localOk = this.atomicSaveSync(filePath, this.tickets);
+
+          let cloudResult: { success: boolean; error?: string } = { success: true };
+          if (GITHUB_TOKEN && GITHUB_TOKEN.trim()) {
+            try {
+              cloudResult = await saveGitHubTickets(this.tickets);
+            } catch (cloudErr: any) {
+              cloudResult = { success: false, error: cloudErr?.message || String(cloudErr) };
+            }
+          }
+
+          resolve(localOk ? cloudResult : { success: false, error: 'Local atomic write failed' });
+        } catch (err: any) {
+          resolve({ success: false, error: err?.message || String(err) });
+        }
+      });
+    });
   }
 
   getTenants(): Tenant[] {
@@ -508,7 +613,7 @@ class TicketStore {
           );
           try {
             const filePath = this.getStoragePath();
-            fs.writeFileSync(filePath, JSON.stringify(this.tickets, null, 2), 'utf-8');
+            this.atomicSaveSync(filePath, this.tickets);
           } catch {}
         }
       } catch (err) {

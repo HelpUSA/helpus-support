@@ -89,6 +89,9 @@ export default function ClientPortalPage() {
   const prevProgressRef = useRef<Map<string, number>>(new Map());
   const selectedTicketRef = useRef<Ticket | null>(null);
   const tenantFilterRef = useRef<string>('all');
+  const inFlightRef = useRef<boolean>(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const failureCountRef = useRef<number>(0);
 
   useEffect(() => {
     tenantFilterRef.current = tenantFilter;
@@ -134,33 +137,95 @@ export default function ClientPortalPage() {
     tenantFilterRef.current = initialTenant;
     loadTickets(initialTenant, true);
 
-    const interval = setInterval(() => {
-      loadTickets(tenantFilterRef.current, false);
-    }, 2000);
+    // Otimização de Polling Inteligente (P2):
+    // - Redução/pausa quando a aba estiver oculta (document.visibilityState === 'hidden')
+    // - Atualização imediata ao retornar para o primeiro plano (visibilitychange)
+    // - Backoff exponencial controlado em falhas sucessivas
+    let timerId: NodeJS.Timeout;
+    let isCancelled = false;
 
-    return () => clearInterval(interval);
+    const scheduleNextPoll = () => {
+      if (isCancelled) return;
+      const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      let delay = 2500;
+
+      if (isHidden) {
+        delay = 30000; // Reduz para 30s se a aba estiver em segundo plano
+      } else if (failureCountRef.current > 0) {
+        // Backoff exponencial controlado em falhas sucessivas: 2.5s, 5s, 10s... até máx 30s
+        delay = Math.min(30000, 2500 * Math.pow(1.5, Math.min(failureCountRef.current, 5)));
+      }
+
+      timerId = setTimeout(async () => {
+        if (!isCancelled) {
+          await loadTickets(tenantFilterRef.current, false);
+          scheduleNextPoll();
+        }
+      }, delay);
+    };
+
+    scheduleNextPoll();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && !isCancelled) {
+        clearTimeout(timerId);
+        loadTickets(tenantFilterRef.current, false);
+        scheduleNextPoll();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timerId);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   const loadTickets = async (filterTenantId: string, isInitial = false) => {
+    // Prevenção de requisições simultâneas duplicadas
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+
     try {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      abortControllerRef.current = new AbortController();
+
+      const authHeaders = AuthService.getAuthHeaders();
       const res = await fetch(`/api/tickets?tenantId=${filterTenantId}&t=${Date.now()}`, {
+        headers: authHeaders,
         cache: 'no-store',
+        signal: abortControllerRef.current.signal,
       });
       const data = await res.json();
       
       let fetchedTickets: Ticket[] = data.success ? data.data : [];
 
       if (data.success) {
+        failureCountRef.current = 0; // Recuperação e reset de falhas
         fetchedTickets = data.data;
         if (typeof window !== 'undefined') {
           localStorage.setItem('helpus_client_tickets_cache_v5', JSON.stringify(fetchedTickets));
         }
-      } else if (typeof window !== 'undefined') {
-        const cached = localStorage.getItem('helpus_client_tickets_cache_v5');
-        if (cached) {
-          try {
-            fetchedTickets = JSON.parse(cached);
-          } catch {}
+      } else {
+        failureCountRef.current += 1;
+        if (typeof window !== 'undefined') {
+          const cached = localStorage.getItem('helpus_client_tickets_cache_v5');
+          if (cached) {
+            try {
+              fetchedTickets = JSON.parse(cached);
+            } catch {}
+          }
         }
       }
 
@@ -212,8 +277,13 @@ export default function ClientPortalPage() {
         setSelectedTicket(fetchedTickets[0]);
         selectedTicketRef.current = fetchedTickets[0];
       }
-    } catch (e) {
-      console.error('Error fetching tickets:', e);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        failureCountRef.current += 1;
+        console.error('Error fetching tickets:', e);
+      }
+    } finally {
+      inFlightRef.current = false;
     }
   };
 
@@ -281,7 +351,7 @@ export default function ClientPortalPage() {
 
       const res = await fetch('/api/tickets', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tenantId: selectedTenant,
           title,
@@ -354,7 +424,7 @@ export default function ClientPortalPage() {
 
       const res = await fetch(`/api/tickets/${ticketId}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'approve',
           agentName: user?.name || 'HelpUS Master',
@@ -401,7 +471,7 @@ export default function ClientPortalPage() {
     try {
       const res = await fetch(`/api/tickets/${selectedTicket.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'reject',
           rejectionReason: rejectionReason.trim(),
@@ -442,7 +512,7 @@ export default function ClientPortalPage() {
     try {
       const res = await fetch(`/api/tickets/${selectedTicket.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'edit',
           title: editTitle,
@@ -482,7 +552,7 @@ export default function ClientPortalPage() {
     try {
       const res = await fetch(`/api/tickets/${selectedTicket.id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
           action: 'cancel',
           cancellationReason: cancellationNote.trim(),
@@ -546,7 +616,7 @@ export default function ClientPortalPage() {
       setSendingEmailTicketId(ticket.id);
       const res = await fetch(`/api/tickets/${ticket.id}/email`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...AuthService.getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: ticket.createdByEmail }),
       });
       const data = await res.json();

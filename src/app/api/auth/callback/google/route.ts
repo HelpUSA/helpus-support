@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { signSessionToken, isAuthorizedSuperAdminEmail } from '@/lib/serverAuth';
+import { INITIAL_USERS } from '@/lib/auth';
 
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '812202824664-s716306ibb7c15jh7aok2v0lfnuocpkn.apps.googleusercontent.com';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -85,9 +86,10 @@ export async function GET(request: Request) {
     const name = tokenInfo.name || email.split('@')[0];
 
     // Authoritative role assignment on the server
+    const matchedUser = INITIAL_USERS.find((u) => u.email.toLowerCase() === email.toLowerCase());
     const isSuperAdmin = isAuthorizedSuperAdminEmail(email);
-    const role = isSuperAdmin ? 'super_admin' : 'client_admin';
-    const tenantId = isSuperAdmin ? 'all' : (email.includes('@') ? email.split('@')[1].replace(/\./g, '-') : 'general');
+    const role = isSuperAdmin ? 'super_admin' : (matchedUser?.role || 'client_user');
+    const tenantId = isSuperAdmin ? 'all' : (matchedUser?.tenantId || (email.includes('@') ? email.split('@')[1].replace(/\./g, '-') : 'general'));
 
     // Issue cryptographically signed HMAC-SHA256 session token
     const sessionToken = signSessionToken({

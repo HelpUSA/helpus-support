@@ -182,11 +182,11 @@ export const INITIAL_USERS: UserAccount[] = [
     id: 'usr-alex',
     username: 'dralexgomes',
     email: 'dralexgomes@gmail.com',
-    name: 'Dr. Alex Gomes',
-    role: 'client_admin',
+    name: 'Dr. Alexander Gomes',
+    role: 'client_user',
     tenantId: 'aidoctor',
     tenantName: 'AIDoctor',
-    avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DrAlexGomes',
+    avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DrAlexanderGomes',
     googleEmail: 'dralexgomes@gmail.com',
     hasSupportAccess: true,
     allowedTenantIds: ['aidoctor'],
@@ -194,7 +194,7 @@ export const INITIAL_USERS: UserAccount[] = [
     sessionToken: signSessionToken({
       userId: 'usr-alex',
       email: 'dralexgomes@gmail.com',
-      role: 'client_admin',
+      role: 'client_user',
       tenantId: 'aidoctor',
       allowedTenantIds: ['aidoctor'],
     }),
@@ -232,9 +232,17 @@ export class AuthService {
         let updated = false;
         const emailSet = new Set(parsed.map((u: UserAccount) => u.email.toLowerCase()));
         INITIAL_USERS.forEach((initUser) => {
-          if (!emailSet.has(initUser.email.toLowerCase())) {
+          const existing = parsed.find((u: UserAccount) => u.email.toLowerCase() === initUser.email.toLowerCase());
+          if (!existing) {
             parsed.push(initUser);
             updated = true;
+          } else if (initUser.email.toLowerCase() === 'dralexgomes@gmail.com') {
+            if (existing.role !== 'client_user' || existing.name !== initUser.name) {
+              existing.role = 'client_user';
+              existing.name = initUser.name;
+              existing.sessionToken = initUser.sessionToken;
+              updated = true;
+            }
           }
         });
         if (updated) {
@@ -297,8 +305,11 @@ export class AuthService {
         };
       }
 
+      const isAlex = cleanEmail.includes('dralex') || cleanEmail.includes('alexgomes');
       userAccount = {
         ...found,
+        role: isAlex ? 'client_user' : found.role,
+        name: isAlex ? 'Dr. Alexander Gomes' : found.name,
         googleEmail: cleanEmail,
         email: cleanEmail,
       };
@@ -311,7 +322,7 @@ export class AuthService {
       const isAlex = cleanEmail.includes('dralex') || cleanEmail.includes('alexgomes');
       const userTenantId = isAlex ? 'aidoctor' : (isNaldo ? 'studionaldohair' : (isMaryana ? 'usmle' : (isKaline ? 'kaline-modas' : (isEduardo ? 'neuro.eduardomagalhaes' : 'publicarte'))));
       const userTenantName = isAlex ? 'AIDoctor' : (isNaldo ? 'Studio Naldo Hair' : (isMaryana ? 'USMLE Prep Suite' : (isKaline ? 'Kaline Modas' : (isEduardo ? 'Dr. Eduardo Magalhães Neurologista' : 'Public Arte'))));
-      const defaultName = isAlex ? 'Dr. Alex Gomes' : (isNaldo ? 'Elinaldo Gonçalves (Naldo)' : (isMaryana ? 'Maryana Chaves' : (name || cleanEmail.split('@')[0])));
+      const defaultName = isAlex ? 'Dr. Alexander Gomes' : (isNaldo ? 'Elinaldo Gonçalves (Naldo)' : (isMaryana ? 'Maryana Chaves' : (name || cleanEmail.split('@')[0])));
 
       userAccount = {
         id: `usr-google-${Date.now()}`,
@@ -319,7 +330,7 @@ export class AuthService {
         email: cleanEmail,
         googleEmail: cleanEmail,
         name: defaultName,
-        role: (isKaline || isEduardo || isMaryana || isNaldo || isAlex) ? 'client_admin' : 'client_user',
+        role: (isKaline || isEduardo || isMaryana || isNaldo) ? 'client_admin' : 'client_user',
         tenantId: userTenantId,
         tenantName: userTenantName,
         avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanEmail}`,

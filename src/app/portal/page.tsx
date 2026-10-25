@@ -141,7 +141,10 @@ export default function ClientPortalPage() {
     let currentUser: UserAccount | null = AuthService.getCurrentUser();
 
     if (currentUser && currentUser.email !== 'helpus.ecommerce@gmail.com' && currentUser.email !== 'wagner.redes@gmail.com' && currentUser.role !== 'super_admin') {
-      currentUser.role = 'client_admin';
+      if (currentUser.email === 'dralexgomes@gmail.com') {
+        currentUser.role = 'client_user';
+        currentUser.name = 'Dr. Alexander Gomes';
+      }
     }
 
     setUser(currentUser);

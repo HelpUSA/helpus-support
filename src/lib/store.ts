@@ -499,6 +499,10 @@ export class TicketStore {
       return process.env.HELPUS_DB_FILE;
     }
 
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      return path.join(os.tmpdir() || '/tmp', 'helpus_tickets_cache_v2.json');
+    }
+
     try {
       // 1. Prioridade: arquivo persistente na raiz do projeto
       const projectRootPath = path.join(process.cwd(), 'helpus_tickets_cache_v2.json');
@@ -653,7 +657,7 @@ export class TicketStore {
             }
           }
 
-          resolve(localOk ? cloudResult : { success: false, error: 'Local atomic write failed' });
+          resolve(cloudResult.success ? cloudResult : (localOk ? { success: true } : cloudResult));
         } catch (err: any) {
           resolve({ success: false, error: err?.message || String(err) });
         }
@@ -680,15 +684,20 @@ export class TicketStore {
     if (typeof window === 'undefined') {
       try {
         const cloudTickets = await fetchGitHubTickets();
-        if (Array.isArray(cloudTickets) && cloudTickets.length > 0) {
-          this.tickets = cloudTickets.sort(
-            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-          );
-          try {
-            const filePath = this.getStoragePath();
-            this.atomicSaveSync(filePath, this.tickets);
-          } catch {}
+        const baseTickets = (Array.isArray(cloudTickets) && cloudTickets.length > 0) ? cloudTickets : this.tickets;
+        const merged = [...baseTickets];
+        for (const initTicket of INITIAL_TICKETS) {
+          if (!merged.some((t) => t.id === initTicket.id || t.code === initTicket.code)) {
+            merged.push(initTicket);
+          }
         }
+        this.tickets = merged.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        try {
+          const filePath = this.getStoragePath();
+          this.atomicSaveSync(filePath, this.tickets);
+        } catch {}
       } catch (err) {
         console.error('Cloud ticket fetch error in getTicketsAsync', err);
       }

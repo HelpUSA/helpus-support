@@ -74,7 +74,10 @@ export async function PATCH(
     // Ensure tickets are fetched from GitHub database on serverless execution
     await ticketStore.getTicketsAsync();
 
-    const existingTicket = ticketStore.getTicketById(id);
+    let existingTicket = ticketStore.getTicketById(id);
+    if (!existingTicket && body.ticketData) {
+      existingTicket = ticketStore.rehydrateTicket(body.ticketData);
+    }
     if (!existingTicket) {
       return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
     }

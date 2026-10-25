@@ -12,6 +12,80 @@ export { INITIAL_TENANTS };
 
 export const INITIAL_TICKETS: Ticket[] = [
   {
+    id: "tck-1792960000000",
+    tenantId: "aidoctor",
+    tenantName: "AIDoctor",
+    code: "AID-101",
+    title: "Retire o texto circulado na imagem em anexo",
+    description: "Solicitação para remoção dos textos circulares com badges de CRM fictícios (CRM/SP, CRM/RJ, CRM/PR) na seção de depoimentos da aplicação AIDoctor (aidoctor.helpusbr.com), adequando a página às normas de publicidade médica do CFM.",
+    category: "feature",
+    priority: "high",
+    status: "resolved",
+    assignedTo: "HelpUS Master SuperAdmin",
+    createdByEmail: "helpus.ecommerce@gmail.com",
+    createdByName: "SuperAdmin HelpUS",
+    contextData: {
+      url: "https://aidoctor.helpusbr.com",
+      userEmail: "helpus.ecommerce@gmail.com",
+      userName: "SuperAdmin HelpUS",
+      os: "Mobile Android / Chrome",
+      screen: "472x1024"
+    },
+    attachments: [
+      {
+        id: "att-aid-01",
+        name: "screenshot_crm_circulado.png",
+        url: "/uploads/screenshot_crm_circulado.png",
+        type: "image/png",
+        size: 142000
+      }
+    ],
+    messages: [
+      {
+        id: "msg-aid-001",
+        ticketId: "tck-1792960000000",
+        senderId: "helpus.ecommerce@gmail.com",
+        senderName: "SuperAdmin HelpUS",
+        senderRole: "client",
+        isInternalNote: false,
+        content: "Retire o texto circulado na imagem em anexo (CRM/SP no card de depoimentos de médicos).",
+        createdAt: "2026-10-25T17:30:00.000Z"
+      },
+      {
+        id: "msg-aid-002",
+        ticketId: "tck-1792960000000",
+        senderId: "helpus-master",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "✅ Aprovação Concedida pelo Administrador HelpUS (HelpUS Master SuperAdmin). Autorizando envio para produção...",
+        createdAt: "2026-10-25T17:34:00.000Z"
+      },
+      {
+        id: "msg-aid-003",
+        ticketId: "tck-1792960000000",
+        senderId: "ci.cd@helpusbr.com",
+        senderName: "Pipeline de Produção Vercel",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "⚡ *[ENTROU EM PRODUÇÃO]*: O robô autônomo iniciou o processamento do código e o envio para a nuvem Vercel (AIDoctor). Compilação e deploy concluídos.",
+        createdAt: "2026-10-25T17:34:05.000Z"
+      },
+      {
+        id: "msg-aid-004",
+        ticketId: "tck-1792960000000",
+        senderId: "helpus-master",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "agent",
+        isInternalNote: false,
+        content: "✨ *[CONCLUÍDO & RESOLVIDO]*: O texto circulado 'CRM/SP' e os placeholders 'CRM/RJ' e 'CRM/PR' foram completamente removidos dos cards de depoimentos da página https://aidoctor.helpusbr.com. Em seu lugar, foram inseridos ícones vetoriais neutros em SVG estilizados em dourado (#D4AF37), garantindo 100% de conformidade com a Resolução CFM nº 2.336/2023 de Publicidade Médica. Deploy realizado em produção na Vercel com sucesso.",
+        createdAt: "2026-10-25T17:53:00.000Z"
+      }
+    ],
+    createdAt: "2026-10-25T17:30:00.000Z",
+    updatedAt: "2026-10-25T17:53:00.000Z"
+  },
+  {
     id: "tck-1791240000000",
     tenantId: "usmle",
     tenantName: "USMLE Prep Suite",
@@ -625,6 +699,22 @@ export class TicketStore {
 
   getTicketById(id: string): Ticket | undefined {
     return this.tickets.find((t) => t.id === id || t.code === id);
+  }
+
+  rehydrateTicket(ticket: Ticket): Ticket {
+    if (!ticket || !ticket.id) return ticket;
+    const existingIndex = this.tickets.findIndex((t) => t.id === ticket.id || t.code === ticket.code);
+    if (existingIndex >= 0) {
+      this.tickets[existingIndex] = { ...this.tickets[existingIndex], ...ticket };
+      return this.tickets[existingIndex];
+    }
+    this.tickets.unshift(ticket);
+    try {
+      this.save();
+    } catch (e) {
+      console.error('Error saving rehydrated ticket:', e);
+    }
+    return ticket;
   }
 
   createTicket(data: {

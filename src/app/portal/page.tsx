@@ -426,6 +426,7 @@ export default function ClientPortalPage() {
         'fba-suite': 'HelpUs FBA Suite',
         studionaldohair: 'Studio Naldo Hair',
         usmle: 'USMLE Prep Suite',
+        aidoctor: 'AIDoctor',
       };
 
       const finalTenantId = isMasterUser ? (targetTenantId || selectedTicket?.tenantId || user?.tenantId || 'neuro.eduardomagalhaes') : (selectedTicket?.tenantId || user?.tenantId || 'neuro.eduardomagalhaes');

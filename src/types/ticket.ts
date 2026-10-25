@@ -44,6 +44,7 @@ export interface TicketContext {
 }
 
 export interface Ticket {
+  aiBridgeOrchestrated?: boolean;
   id: string;
   tenantId: string;
   tenantName: string;

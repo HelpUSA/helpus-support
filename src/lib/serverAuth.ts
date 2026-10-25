@@ -60,6 +60,34 @@ export interface ServerAuthDecision {
   error?: string;
 }
 
+function toBase64Url(str: string): string {
+  return Buffer.from(str, 'utf-8').toString('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function digestBase64Url(hmac: crypto.Hmac): string {
+  return hmac.digest('base64').replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+function fromBase64Url(b64url: string): string {
+  let base64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4 !== 0) {
+    base64 += '=';
+  }
+  return Buffer.from(base64, 'base64').toString('utf-8');
+}
+
+function safeTimingEqual(a: Buffer, b: Buffer): boolean {
+  if (a.length !== b.length) return false;
+  if (typeof crypto !== 'undefined' && typeof crypto.timingSafeEqual === 'function') {
+    return crypto.timingSafeEqual(a, b);
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a[i] ^ b[i];
+  }
+  return diff === 0;
+}
+
 export function isAuthorizedSuperAdminEmail(email?: string): boolean {
   if (!email) return false;
   return (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[])
@@ -98,10 +126,10 @@ export function signSessionToken(
     iss: 'helpus-support-server',
   };
 
-  const payloadB64 = Buffer.from(JSON.stringify(fullPayload), 'utf-8').toString('base64url');
+  const payloadB64 = toBase64Url(JSON.stringify(fullPayload));
   const hmac = crypto.createHmac('sha256', SERVER_AUTH_SECRET);
   hmac.update(`v1.${payloadB64}`);
-  const sigB64 = hmac.digest('base64url');
+  const sigB64 = digestBase64Url(hmac);
 
   return `v1.${payloadB64}.${sigB64}`;
 }
@@ -123,19 +151,19 @@ export function verifySessionToken(tokenString: string): SessionPayload | null {
   // 1. Recalcula a assinatura HMAC esperada
   const hmac = crypto.createHmac('sha256', SERVER_AUTH_SECRET);
   hmac.update(`v1.${payloadB64}`);
-  const expectedSigB64 = hmac.digest('base64url');
+  const expectedSigB64 = digestBase64Url(hmac);
 
   // 2. Comparação em tempo constante (evita timing attacks)
   const expectedBuf = Buffer.from(expectedSigB64, 'utf-8');
   const providedBuf = Buffer.from(sigB64, 'utf-8');
 
-  if (expectedBuf.length !== providedBuf.length || !crypto.timingSafeEqual(expectedBuf, providedBuf)) {
+  if (!safeTimingEqual(expectedBuf, providedBuf)) {
     return null; // Assinatura forjada ou inválida
   }
 
   // 3. Decodifica o payload e valida expiração
   try {
-    const payloadJson = Buffer.from(payloadB64, 'base64url').toString('utf-8');
+    const payloadJson = fromBase64Url(payloadB64);
     const payload: SessionPayload = JSON.parse(payloadJson);
 
     const now = Math.floor(Date.now() / 1000);

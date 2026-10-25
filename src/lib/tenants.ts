@@ -2,6 +2,7 @@ import { Tenant } from '@/types/ticket';
 
 export const INITIAL_TENANTS: Tenant[] = [
   { id: 'advert', name: 'Advert Marketing', slug: 'advert', domain: 'advert.helpusbr.com', primaryColor: '#3b82f6', apiKey: 'adv_live_001', createdAt: '2026-09-01T10:00:00Z' },
+  { id: 'aidoctor', name: 'AIDoctor', slug: 'aidoctor', domain: 'aidoctor.helpusbr.com', primaryColor: '#0ea5e9', apiKey: 'aid_live_048', createdAt: '2026-10-25T10:00:00Z' },
   { id: 'ai-engine', name: 'AI Engine Core', slug: 'ai-engine', domain: 'ai.helpusbr.com', primaryColor: '#8b5cf6', apiKey: 'aie_live_002', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'ariticumchales', name: 'Ariticum Chalés', slug: 'ariticumchales', domain: 'ariticumchales.com.br', primaryColor: '#059669', apiKey: 'ari_live_003', createdAt: '2026-09-01T10:00:00Z' },
   { id: 'barbearia', name: 'Barbearia App', slug: 'barbearia', domain: 'barbearia.helpusbr.com', primaryColor: '#d97706', apiKey: 'bar_live_004', createdAt: '2026-09-01T10:00:00Z' },

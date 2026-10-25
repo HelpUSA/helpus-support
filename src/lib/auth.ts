@@ -178,6 +178,27 @@ export const INITIAL_USERS: UserAccount[] = [
       allowedTenantIds: ['studionaldohair'],
     }),
   },
+  {
+    id: 'usr-alex',
+    username: 'dralexgomes',
+    email: 'dralexgomes@gmail.com',
+    name: 'Dr. Alex Gomes',
+    role: 'client_admin',
+    tenantId: 'aidoctor',
+    tenantName: 'AIDoctor',
+    avatarUrl: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DrAlexGomes',
+    googleEmail: 'dralexgomes@gmail.com',
+    hasSupportAccess: true,
+    allowedTenantIds: ['aidoctor'],
+    status: 'active',
+    sessionToken: signSessionToken({
+      userId: 'usr-alex',
+      email: 'dralexgomes@gmail.com',
+      role: 'client_admin',
+      tenantId: 'aidoctor',
+      allowedTenantIds: ['aidoctor'],
+    }),
+  },
 ];
 
 export const AUTHORIZED_SUPERADMIN_IDS = [
@@ -287,9 +308,10 @@ export class AuthService {
       const isKaline = cleanEmail.includes('kaline') || cleanEmail.includes('augustokaline');
       const isMaryana = cleanEmail.includes('marychaves') || cleanEmail.includes('maryana');
       const isNaldo = cleanEmail.includes('elinaldo') || cleanEmail.includes('naldo');
-      const userTenantId = isNaldo ? 'studionaldohair' : (isMaryana ? 'usmle' : (isKaline ? 'kaline-modas' : (isEduardo ? 'neuro.eduardomagalhaes' : 'publicarte')));
-      const userTenantName = isNaldo ? 'Studio Naldo Hair' : (isMaryana ? 'USMLE Prep Suite' : (isKaline ? 'Kaline Modas' : (isEduardo ? 'Dr. Eduardo Magalhães Neurologista' : 'Public Arte')));
-      const defaultName = isNaldo ? 'Elinaldo Gonçalves (Naldo)' : (isMaryana ? 'Maryana Chaves' : (name || cleanEmail.split('@')[0]));
+      const isAlex = cleanEmail.includes('dralex') || cleanEmail.includes('alexgomes');
+      const userTenantId = isAlex ? 'aidoctor' : (isNaldo ? 'studionaldohair' : (isMaryana ? 'usmle' : (isKaline ? 'kaline-modas' : (isEduardo ? 'neuro.eduardomagalhaes' : 'publicarte'))));
+      const userTenantName = isAlex ? 'AIDoctor' : (isNaldo ? 'Studio Naldo Hair' : (isMaryana ? 'USMLE Prep Suite' : (isKaline ? 'Kaline Modas' : (isEduardo ? 'Dr. Eduardo Magalhães Neurologista' : 'Public Arte'))));
+      const defaultName = isAlex ? 'Dr. Alex Gomes' : (isNaldo ? 'Elinaldo Gonçalves (Naldo)' : (isMaryana ? 'Maryana Chaves' : (name || cleanEmail.split('@')[0])));
 
       userAccount = {
         id: `usr-google-${Date.now()}`,
@@ -297,7 +319,7 @@ export class AuthService {
         email: cleanEmail,
         googleEmail: cleanEmail,
         name: defaultName,
-        role: (isKaline || isEduardo || isMaryana || isNaldo) ? 'client_admin' : 'client_user',
+        role: (isKaline || isEduardo || isMaryana || isNaldo || isAlex) ? 'client_admin' : 'client_user',
         tenantId: userTenantId,
         tenantName: userTenantName,
         avatarUrl: avatarUrl || `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanEmail}`,

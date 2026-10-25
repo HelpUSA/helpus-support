@@ -640,7 +640,7 @@ export class TicketStore {
   }): Ticket {
     const tenant = this.getTenantById(data.tenantId) || {
       id: data.tenantId,
-      name: data.tenantId === 'studionaldohair' ? 'Studio Naldo Hair' : data.tenantId === 'neuro.eduardomagalhaes' ? 'Dr. Eduardo Magalhães Neurologista (Neuro)' : data.tenantId === 'tatica' ? 'Tática Assessoria Contábil' : data.tenantId === 'fba-suite' ? 'HelpUs FBA Suite' : 'Sistema Cliente',
+      name: data.tenantId === 'aidoctor' ? 'AIDoctor' : data.tenantId === 'studionaldohair' ? 'Studio Naldo Hair' : data.tenantId === 'neuro.eduardomagalhaes' ? 'Dr. Eduardo Magalhães Neurologista (Neuro)' : data.tenantId === 'tatica' ? 'Tática Assessoria Contábil' : data.tenantId === 'fba-suite' ? 'HelpUs FBA Suite' : 'Sistema Cliente',
       slug: data.tenantId,
       domain: `${data.tenantId}.helpusbr.com`,
       apiKey: 'key',

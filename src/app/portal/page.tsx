@@ -1500,7 +1500,7 @@ export default function ClientPortalPage() {
                     </span>
                   </div>
 
-                  {selectedTicket.status === 'pending_approval' ? (
+                  {selectedTicket.status === 'pending_approval' || selectedTicket.status === 'new' || selectedTicket.status === 'in_progress' ? (
                     <>
                       <p className="text-xs text-slate-200 leading-relaxed">
                         Como Administrador Master, você pode <strong>Aceitar e Executar Alterações Autônomas</strong> no código (compilar e enviar para a nuvem Vercel), ou <strong>Rejeitar / Recusar</strong> este chamado a qualquer momento.

@@ -20,7 +20,7 @@ export const INITIAL_TICKETS: Ticket[] = [
     description: "Solicitação para remoção dos textos circulares com badges de CRM fictícios (CRM/SP, CRM/RJ, CRM/PR) na seção de depoimentos da aplicação AIDoctor (aidoctor.helpusbr.com), adequando a página às normas de publicidade médica do CFM.",
     category: "feature",
     priority: "high",
-    status: "resolved",
+    status: "pending_approval",
     assignedTo: "HelpUS Master SuperAdmin",
     createdByEmail: "helpus.ecommerce@gmail.com",
     createdByName: "SuperAdmin HelpUS",
@@ -80,6 +80,16 @@ export const INITIAL_TICKETS: Ticket[] = [
         isInternalNote: false,
         content: "✨ *[CONCLUÍDO & RESOLVIDO]*: O texto circulado 'CRM/SP' e os placeholders 'CRM/RJ' e 'CRM/PR' foram completamente removidos dos cards de depoimentos da página https://aidoctor.helpusbr.com. Em seu lugar, foram inseridos ícones vetoriais neutros em SVG estilizados em dourado (#D4AF37), garantindo 100% de conformidade com a Resolução CFM nº 2.336/2023 de Publicidade Médica. Deploy realizado em produção na Vercel com sucesso.",
         createdAt: "2026-10-25T17:53:00.000Z"
+      },
+      {
+        id: "msg-aid-005",
+        ticketId: "tck-1792960000000",
+        senderId: "helpus.ecommerce@gmail.com",
+        senderName: "HelpUS Master SuperAdmin",
+        senderRole: "client",
+        isInternalNote: false,
+        content: "🔄 *Chamado Reaberto pelo Cliente (HelpUS Master SuperAdmin)*\n\nMotivo da Reabertura: a mensagem ainda continua.\n\n*Aguardando Nova Aprovação Master para Envio a Produção.*",
+        createdAt: "2026-10-25T19:25:00.000Z"
       }
     ],
     createdAt: "2026-10-25T17:30:00.000Z",
@@ -1144,6 +1154,10 @@ export class TicketStore {
     if (!ticket) return undefined;
 
     ticket.status = status;
+    if (status === 'pending_approval') {
+      ticket.progressPercentage = 0;
+      delete ticket.progressStep;
+    }
     if (assignedTo !== undefined) {
       ticket.assignedTo = assignedTo;
     }
@@ -1324,10 +1338,12 @@ export class TicketStore {
     const ticket = this.getTicketById(id);
     if (!ticket) return undefined;
 
-    ticket.status = 'in_progress';
+    ticket.status = 'pending_approval';
+    ticket.progressPercentage = 0;
+    delete ticket.progressStep;
     ticket.updatedAt = new Date().toISOString();
 
-    const reopenMsg = `🔄 *Chamado Reaberto pelo Cliente (${reopenedByName || 'Cliente'})*\n\nMotivo da Reabertura: ${reason}`;
+    const reopenMsg = `🔄 *Chamado Reaberto pelo Cliente (${reopenedByName || 'Cliente'})*\n\nMotivo da Reabertura: ${reason}\n\n*Aguardando Nova Aprovação Master para Envio a Produção.*`;
 
     ticket.messages.push({
       id: `msg-${Date.now()}`,

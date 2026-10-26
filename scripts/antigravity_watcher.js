@@ -2084,6 +2084,21 @@ if (require.main === module) {
     const res = resetDailyBudget();
     console.log(JSON.stringify(res, null, 2));
     process.exit(res.ok ? 0 : 1);
+  } else if (args.some(a => a.startsWith('--dispatch-ticket='))) {
+    // Ordem 053: SBX local-only; dry-run by default; zero GitHub requests.
+    const ticketId = args.find(a => a.startsWith('--dispatch-ticket=')).split('=')[1];
+    const { dispatchSandboxTicket } = require('./sandbox_dispatch.js');
+    const pause = isWorkerPaused();
+    dispatchSandboxTicket(ticketId, {
+      paused: pause.paused,
+      confirmed: args.includes('--send-local'),
+    }).then(result => {
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(result.ok ? 0 : 1);
+    }).catch(error => {
+      console.error('[SANDBOX DISPATCH] Operacao abortada:', error.message);
+      process.exit(1);
+    });
   } else {
     const isTestConn = args.includes('--test-connection') || args.includes('-t') || process.env.WORKER_MODE === 'test_connection';
     if (isTestConn) {

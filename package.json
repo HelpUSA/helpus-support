@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start --port 3012",
     "lint": "next lint",
-    "test": "node scripts/test_remediation_p0_p1.mjs && tsx scripts/test_store_behavior.mjs && tsx scripts/test_order031_architecture.mjs && tsx scripts/test_order035_durable_queue.mjs && tsx scripts/test_order039_diagnostics.mjs && node scripts/test_order041_auth_remediation.mjs && node scripts/test_order048_credential_hardening.mjs && node scripts/test_order050_cost_governance.mjs && tsx scripts/test_order051_ticket_truth.mjs"
+    "test": "node scripts/test_remediation_p0_p1.mjs && tsx scripts/test_store_behavior.mjs && tsx scripts/test_order031_architecture.mjs && tsx scripts/test_order035_durable_queue.mjs && tsx scripts/test_order039_diagnostics.mjs && node scripts/test_order041_auth_remediation.mjs && node scripts/test_order048_credential_hardening.mjs && node scripts/test_order050_cost_governance.mjs && tsx scripts/test_order051_ticket_truth.mjs && node scripts/test_order053_local_dispatch.mjs"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.2",

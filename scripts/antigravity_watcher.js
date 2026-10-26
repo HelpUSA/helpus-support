@@ -744,39 +744,243 @@ function getServiceWorkerToken(expiresInSeconds = 300, options = {}) {
   return `v1.${payloadB64}.${sig}`;
 }
 
-// P0-EXEC (Ordem 031): Fila durável com leases em memória e idempotência de execuções
-const activeLeases = new Map(); // ticketId -> { leaseUntil, attemptId, status }
+// P0-EXEC (Ordem 035): Fila durável com persistência de job/attempt, claim atômico, idempotência, ACK e recuperação pós-crash
+class DurableClaimStore {
+  constructor(options = {}) {
+    this.storagePath = options.storagePath || process.env.HELPUS_CLAIMS_PATH || path.join(process.cwd(), 'data', 'helpus_claims_ledger.json');
+    this.leaseDurationMs = options.leaseDurationMs || 60000;
+    this.deps = options.deps || {};
+    this.claims = new Map();
+    this.loadClaims();
+  }
+
+  loadClaims() {
+    if (this.deps.claimsStorage && typeof this.deps.claimsStorage.getClaims === 'function') {
+      const data = this.deps.claimsStorage.getClaims();
+      this.claims = new Map(Object.entries(data || {}));
+      return;
+    }
+    try {
+      if (fs.existsSync(this.storagePath)) {
+        const raw = fs.readFileSync(this.storagePath, 'utf-8');
+        const parsed = JSON.parse(raw);
+        this.claims = new Map(Object.entries(parsed || {}));
+      } else {
+        this.claims = new Map();
+      }
+    } catch (_) {
+      this.claims = new Map();
+    }
+  }
+
+  saveClaims() {
+    const obj = Object.fromEntries(this.claims.entries());
+    if (this.deps.claimsStorage && typeof this.deps.claimsStorage.saveClaims === 'function') {
+      this.deps.claimsStorage.saveClaims(obj);
+      return;
+    }
+    try {
+      const dir = path.dirname(this.storagePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      const tmpPath = `${this.storagePath}.tmp.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
+      fs.writeFileSync(tmpPath, JSON.stringify(obj, null, 2), 'utf-8');
+      fs.renameSync(tmpPath, this.storagePath);
+    } catch (_) {
+      try {
+        const osTmp = require('os').tmpdir();
+        const fallbackPath = path.join(osTmp, 'helpus_claims_ledger.json');
+        fs.writeFileSync(fallbackPath, JSON.stringify(obj, null, 2), 'utf-8');
+      } catch (err) {}
+    }
+  }
+
+  getClaim(ticketId) {
+    this.loadClaims();
+    return this.claims.get(ticketId) || null;
+  }
+
+  acquireClaim(ticketId, currentStatus, options = {}) {
+    this.loadClaims();
+    const now = options.now || Date.now();
+    const durationMs = options.durationMs || this.leaseDurationMs;
+    const workerId = options.workerId || 'worker-antigravity-node';
+
+    const existing = this.claims.get(ticketId);
+
+    // 1. Idempotência / Checagem de claim ativo
+    if (existing) {
+      const isUnexpired = existing.leaseExpiresAt && new Date(existing.leaseExpiresAt).getTime() > now;
+      if (isUnexpired) {
+        if (existing.status === 'claimed') {
+          return {
+            acquired: false,
+            reason: 'active_claim_held',
+            attemptId: existing.attemptId,
+            fencingToken: existing.fencingToken,
+            leaseExpiresAt: existing.leaseExpiresAt
+          };
+        }
+        if (existing.status === 'acked' && existing.ticketStatus === currentStatus) {
+          return {
+            acquired: false,
+            reason: 'already_completed',
+            attemptId: existing.attemptId,
+            fencingToken: existing.fencingToken,
+            result: existing.result
+          };
+        }
+      }
+    }
+
+    // 2. Claim Atômico com Fencing Token Monotônico
+    const fencingToken = (existing?.fencingToken || 0) + 1;
+    const attemptId = `att-${now}-${crypto.randomBytes(4).toString('hex')}`;
+    const leaseExpiresAt = new Date(now + durationMs).toISOString();
+
+    const claimRecord = {
+      ticketId,
+      attemptId,
+      fencingToken,
+      workerId,
+      status: 'claimed',
+      ticketStatus: currentStatus,
+      claimedAt: new Date(now).toISOString(),
+      leaseExpiresAt,
+      completedAt: null,
+      result: null,
+      lastError: null,
+      retryCount: (existing?.retryCount || 0) + (existing?.status === 'failed' || existing?.status === 'recovered' ? 1 : 0)
+    };
+
+    this.claims.set(ticketId, claimRecord);
+    this.saveClaims();
+
+    return {
+      acquired: true,
+      attemptId,
+      fencingToken,
+      leaseExpiresAt,
+      workerId
+    };
+  }
+
+  ackClaim(ticketId, attemptId, result = {}, options = {}) {
+    this.loadClaims();
+    const now = options.now || Date.now();
+    const claim = this.claims.get(ticketId);
+
+    if (!claim) {
+      return { acked: false, reason: 'claim_not_found' };
+    }
+
+    if (claim.attemptId !== attemptId) {
+      return { acked: false, reason: 'stale_attempt_or_fencing_mismatch', currentAttemptId: claim.attemptId };
+    }
+
+    claim.status = 'acked';
+    claim.completedAt = new Date(now).toISOString();
+    claim.result = result;
+    this.saveClaims();
+
+    return { acked: true, attemptId, fencingToken: claim.fencingToken };
+  }
+
+  releaseClaim(ticketId, attemptId, reason = 'error', options = {}) {
+    this.loadClaims();
+    const now = options.now || Date.now();
+    const claim = this.claims.get(ticketId);
+
+    if (!claim) return false;
+    if (claim.attemptId !== attemptId) return false;
+
+    claim.status = 'failed';
+    claim.lastError = reason;
+    claim.leaseExpiresAt = new Date(now).toISOString();
+    this.saveClaims();
+    return true;
+  }
+
+  recoverOrphanedClaims(now = Date.now()) {
+    this.loadClaims();
+    const recovered = [];
+
+    for (const [ticketId, claim] of this.claims.entries()) {
+      if (claim.status === 'claimed') {
+        const expiresMs = new Date(claim.leaseExpiresAt).getTime();
+        if (expiresMs <= now) {
+          claim.status = 'recovered';
+          claim.lastError = 'recovered_from_crash_or_timeout';
+          recovered.push({ ticketId, attemptId: claim.attemptId, fencingToken: claim.fencingToken });
+        }
+      }
+    }
+
+    if (recovered.length > 0) {
+      this.saveClaims();
+    }
+    return recovered;
+  }
+}
+
+const defaultClaimStore = new DurableClaimStore();
+
+function getActiveClaimStore(deps = {}) {
+  if (deps.claimStore) return deps.claimStore;
+  if (deps.claimsStorage) return new DurableClaimStore({ deps });
+  return defaultClaimStore;
+}
+
+function acquireClaim(ticketId, currentStatus, options = {}) {
+  const store = getActiveClaimStore(options.deps || {});
+  return store.acquireClaim(ticketId, currentStatus, options);
+}
+
+function ackClaim(ticketId, attemptId, result = {}, options = {}) {
+  const store = getActiveClaimStore(options.deps || {});
+  return store.ackClaim(ticketId, attemptId, result, options);
+}
+
+function releaseClaim(ticketId, attemptId, reason = 'error', options = {}) {
+  const store = getActiveClaimStore(options.deps || {});
+  return store.releaseClaim(ticketId, attemptId, reason, options);
+}
+
+function recoverOrphanedClaims(now = Date.now(), options = {}) {
+  const store = getActiveClaimStore(options.deps || {});
+  return store.recoverOrphanedClaims(now);
+}
+
+function getClaim(ticketId, options = {}) {
+  const store = getActiveClaimStore(options.deps || {});
+  return store.getClaim(ticketId);
+}
+
+// Backwards-compatibility aliases:
+const activeLeases = defaultClaimStore.claims;
 const LEASE_DURATION_MS = 60000;
 
 function clearExpiredLeases(now = Date.now()) {
-  for (const [id, lease] of activeLeases.entries()) {
-    if (lease.leaseUntil <= now) {
-      activeLeases.delete(id);
-    }
-  }
+  return recoverOrphanedClaims(now);
 }
 
 function acquireLease(ticketId, currentStatus, durationMs = LEASE_DURATION_MS, now = Date.now()) {
-  clearExpiredLeases(now);
-  const existing = activeLeases.get(ticketId);
-  if (existing && existing.leaseUntil > now && existing.status === currentStatus) {
-    return null; // Lease ativo e status inalterado: suprime execução duplicada
-  }
-  const attemptId = `att-${now}-${crypto.randomBytes(4).toString('hex')}`;
-  activeLeases.set(ticketId, {
-    leaseUntil: now + durationMs,
-    attemptId,
-    status: currentStatus,
-    acquiredAt: now
-  });
-  return attemptId;
+  const res = acquireClaim(ticketId, currentStatus, { durationMs, now });
+  return res.acquired ? res.attemptId : null;
 }
 
 function releaseLease(ticketId) {
-  activeLeases.delete(ticketId);
+  const claim = getClaim(ticketId);
+  if (claim) {
+    releaseClaim(ticketId, claim.attemptId, 'released');
+  }
 }
 
 async function runWatchdogCycle(options = {}) {
+  // 1. Recuperação proativa de jobs abandonados / órfãos após restart ou crash
+  recoverOrphanedClaims(Date.now(), { deps: options.deps });
+
   const tickets = await fetchTickets(options.deps);
   if (!tickets || !Array.isArray(tickets)) {
     return { success: false, processedCount: 0, reason: 'fetch_failed' };
@@ -786,19 +990,21 @@ async function runWatchdogCycle(options = {}) {
   let processedCount = 0;
 
   for (const t of pendingProduction) {
-    const attemptId = acquireLease(t.id, t.status);
-    if (!attemptId) {
-      console.log(`[WATCHDOG DEDUPLICATION] Chamado [${t.code}] já em execução sob lease ativo. Ignorando disparo duplicado.`);
+    const claim = acquireClaim(t.id, t.status, { durationMs: LEASE_DURATION_MS, deps: options.deps });
+    if (!claim.acquired) {
+      console.log(`[WATCHDOG DEDUPLICATION] Chamado [${t.code}] retenção ativa (${claim.reason}). Ignorando disparo duplicado.`);
       continue;
     }
 
+    const attemptId = claim.attemptId;
     try {
       console.log(`[WATCHDOG LEASE] Adquirido lease [${attemptId}] para o chamado [${t.code}].`);
-      await processTicket(t, { ...options, attemptId }, options.deps);
+      const procResult = await processTicket(t, { ...options, attemptId, fencingToken: claim.fencingToken }, options.deps);
+      ackClaim(t.id, attemptId, procResult, { deps: options.deps });
       processedCount++;
     } catch (err) {
       console.error(`[WATCHDOG] Falha ao processar chamado [${t.code}] (attempt: ${attemptId}):`, err.message);
-      releaseLease(t.id); // Libera o lease imediatamente em caso de erro para permitir retry
+      releaseClaim(t.id, attemptId, err.message, { deps: options.deps });
     }
   }
 
@@ -858,6 +1064,12 @@ module.exports = {
   releaseLease,
   clearExpiredLeases,
   activeLeases,
+  DurableClaimStore,
+  acquireClaim,
+  ackClaim,
+  releaseClaim,
+  recoverOrphanedClaims,
+  getClaim,
 };
 
 if (require.main === module) {

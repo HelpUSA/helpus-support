@@ -101,10 +101,16 @@ export async function PATCH(
         );
       }
 
-      // Ordem 033: Restrição de tenant para service_worker
+      // Ordem 035: Restrição estrita de tenant e tarefa para service_worker
       if (auth.isServiceWorker && !auth.isSuperAdmin) {
+        if (auth.allowedTasks && !auth.allowedTasks.includes('progress')) {
+          return NextResponse.json(
+            { success: false, error: `Acesso negado: Service Worker não possui autorização para a tarefa '${body.action}'.` },
+            { status: 403, headers: ANTI_CACHE_HEADERS }
+          );
+        }
         const allowed = auth.allowedTenantIds || [];
-        const isAllowedTenant = allowed.includes('all') || allowed.includes(existingTicket.tenantId);
+        const isAllowedTenant = allowed.includes(existingTicket.tenantId);
         if (!isAllowedTenant) {
           return NextResponse.json(
             { success: false, error: `Acesso negado: Service Worker não possui escopo autorizado para o tenant '${existingTicket.tenantId}'.` },
@@ -146,6 +152,13 @@ export async function PATCH(
     }
 
     if (body.action === 'approve') {
+      // Ordem 035: service_worker terminantemente bloqueado de aprovação Master
+      if (auth.isServiceWorker) {
+        return NextResponse.json(
+          { success: false, error: 'Aprovação negada: service_worker não possui permissão de aprovação Master.' },
+          { status: 403, headers: ANTI_CACHE_HEADERS }
+        );
+      }
       // Strict Server-Side Permission Check:
       // Only authenticated Master SuperAdmin with matching verified token can approve tickets.
       if (!isSuperAdminCaller) {

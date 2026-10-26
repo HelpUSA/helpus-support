@@ -53,6 +53,7 @@ export interface SessionPayload {
   role: UserRole;
   tenantId: string;
   allowedTenantIds: string[];
+  allowedTasks?: string[];
   iat: number;
   exp: number;
   iss?: string;
@@ -68,6 +69,7 @@ export interface ServerAuthDecision {
   userRole?: UserRole;
   tenantId?: string;
   allowedTenantIds?: string[];
+  allowedTasks?: string[];
   user?: {
     id: string;
     email: string;
@@ -75,6 +77,7 @@ export interface ServerAuthDecision {
     role: UserRole;
     tenantId: string;
     allowedTenantIds: string[];
+    allowedTasks?: string[];
     username: string;
     hasSupportAccess: boolean;
     status: 'active';
@@ -129,6 +132,7 @@ export function signSessionToken(
     role: UserRole;
     tenantId?: string;
     allowedTenantIds?: string[];
+    allowedTasks?: string[];
   },
   expiresInSeconds = 7 * 24 * 3600
 ): string {
@@ -143,6 +147,7 @@ export function signSessionToken(
     role: payload.role,
     tenantId,
     allowedTenantIds: payload.allowedTenantIds || [tenantId],
+    allowedTasks: payload.allowedTasks || (payload.role === 'service_worker' ? ['progress', 'verify'] : undefined),
     iat: now,
     exp: now + expiresInSeconds,
     iss: 'helpus-support-server',
@@ -236,6 +241,25 @@ export function validateServerApiAccess(headers: { get(name: string): string | n
     if (verified) {
       const isSuperAdmin = verified.role === 'super_admin';
       const isServiceWorker = verified.role === 'service_worker';
+
+      let effectiveTenantId = verified.tenantId;
+      let effectiveAllowedTenantIds = verified.allowedTenantIds;
+      if (isSuperAdmin) {
+        effectiveTenantId = 'all';
+        effectiveAllowedTenantIds = ['all'];
+      } else if (isServiceWorker) {
+        // Ordem 035: service_worker nunca recebe 'all' por omissão e fica estritamente restrito
+        effectiveTenantId = verified.tenantId || (verified.allowedTenantIds && verified.allowedTenantIds[0]) || 'publicarte';
+        effectiveAllowedTenantIds = verified.allowedTenantIds && verified.allowedTenantIds.length > 0
+          ? verified.allowedTenantIds
+          : (verified.tenantId ? [verified.tenantId] : ['publicarte']);
+      } else {
+        effectiveTenantId = verified.tenantId || (verified.allowedTenantIds && verified.allowedTenantIds[0]) || 'all';
+        effectiveAllowedTenantIds = verified.allowedTenantIds || (verified.tenantId ? [verified.tenantId] : ['all']);
+      }
+
+      const effectiveTasks = verified.allowedTasks || (isServiceWorker ? ['progress', 'verify'] : undefined);
+
       return {
         authenticated: true,
         isSuperAdmin,
@@ -244,15 +268,17 @@ export function validateServerApiAccess(headers: { get(name: string): string | n
         userId: verified.userId,
         role: verified.role,
         userRole: verified.role,
-        tenantId: isSuperAdmin ? 'all' : (verified.tenantId || (verified.allowedTenantIds && verified.allowedTenantIds[0]) || 'all'),
-        allowedTenantIds: isSuperAdmin ? ['all'] : (verified.allowedTenantIds || (verified.tenantId ? [verified.tenantId] : ['all'])),
+        tenantId: effectiveTenantId,
+        allowedTenantIds: effectiveAllowedTenantIds,
+        allowedTasks: effectiveTasks,
         user: {
           id: verified.userId,
           email: verified.email,
           name: verified.email.split('@')[0],
           role: verified.role,
-          tenantId: isSuperAdmin ? 'all' : verified.tenantId,
-          allowedTenantIds: isSuperAdmin ? ['all'] : verified.allowedTenantIds,
+          tenantId: effectiveTenantId,
+          allowedTenantIds: effectiveAllowedTenantIds,
+          allowedTasks: effectiveTasks,
           username: verified.email.split('@')[0],
           hasSupportAccess: true,
           status: 'active',

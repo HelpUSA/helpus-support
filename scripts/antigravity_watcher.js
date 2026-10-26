@@ -2084,6 +2084,18 @@ if (require.main === module) {
     const res = resetDailyBudget();
     console.log(JSON.stringify(res, null, 2));
     process.exit(res.ok ? 0 : 1);
+  } else if (args.includes('--bridge-status') || args.some(a => a.startsWith('--check-bridge-command='))) {
+    // Ordem 057: ate duas consultas HTTP GET restritas ao loopback, sem despacho.
+    const match=args.find(a=>a.startsWith('--check-bridge-command='));
+    const commandId=match?match.slice('--check-bridge-command='.length):undefined;
+    const {probeLocalBridgeCommand}=require('./bridge_ack_probe.js');
+    probeLocalBridgeCommand(commandId).then(report=>{
+      console.log(JSON.stringify(report,null,2));
+      process.exit(report.ok?0:1);
+    }).catch(error=>{
+      console.error('[BRIDGE PROBE] Falha local:',error.message);
+      process.exit(1);
+    });
   } else if (args.some(a => a.startsWith('--dispatch-approved-sbx='))) {
     // Ordem 056: only a signed, remotely persisted SBX Master approval may be queued.
     const id = args.find(a => a.startsWith('--dispatch-approved-sbx=')).slice('--dispatch-approved-sbx='.length);

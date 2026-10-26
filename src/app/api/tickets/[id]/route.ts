@@ -172,7 +172,7 @@ export async function PATCH(
         id,
         'HelpUS Master SuperAdmin',
         body.adminNotes,
-        body.ticketData,
+        undefined, // approval must use server-owned record, never browser snapshot
         auth.userEmail
       );
       if (!updated) {
@@ -185,7 +185,7 @@ export async function PATCH(
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
 
-      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin), cloudSaveResult }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin), cloudSaveResult, executionDispatched: false }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'complete' || body.action === 'resolve') {

@@ -471,7 +471,7 @@ export default function ClientPortalPage() {
 
         setIsApproveModalOpen(false);
         setAdminNotesInput('');
-        setStatusAlert(`⚡ Chamado [${updatedTicket.code}] Aprovado & ENTROU EM PRODUÇÃO! O robô autônomo está compilando o código e verificando o deploy na nuvem...`);
+        setStatusAlert(`✅ Chamado [${updatedTicket.code}] aprovado e persistido. Execução pendente de confirmação do operador local; nenhum deploy iniciado automaticamente.`);
         setTimeout(() => setStatusAlert(null), 8000);
       } else {
         setStatusAlert(`⚠️ Erro ao aprovar chamado: ${data.error || 'Falha no servidor'}`);
@@ -1511,7 +1511,7 @@ export default function ClientPortalPage() {
                           disabled={isActionLoading}
                           className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all cursor-pointer"
                         >
-                          <CheckCircle2 className="w-4 h-4" /> Aceitar & Executar Alterações (Deploy Vercel)
+                          <CheckCircle2 className="w-4 h-4" /> Aprovar solicitação (execução posterior)
                         </button>
 
                         <button
@@ -1528,7 +1528,7 @@ export default function ClientPortalPage() {
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <span className="text-xs font-bold text-purple-200 flex items-center gap-2">
                           <Cpu className="w-4 h-4 text-purple-400 animate-spin" />
-                          ⚡ Execução Antigravity em Andamento
+                          {(selectedTicket.progressPercentage ?? 0) > 0 ? '⚡ Execução Antigravity em Andamento' : '🕒 Aprovado — Aguardando início da execução'}
                         </span>
                         <span className="text-xs font-extrabold text-indigo-300 font-mono bg-indigo-500/20 px-2.5 py-1 rounded-lg border border-indigo-500/30">
                           {selectedTicket.progressPercentage ?? 0}% CONCLUÍDO

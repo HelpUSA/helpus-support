@@ -1185,7 +1185,7 @@ export class TicketStore {
     ticket.updatedAt = new Date().toISOString();
 
     // 1. Approval message with optional admin notes
-    let approvalContent = `✅ Aprovação Concedida pelo Administrador HelpUS (${agentName}). Autorizando envio para produção...`;
+    let approvalContent = `✅ Aprovação registrada pelo Administrador HelpUS (${agentName}). A execução ainda não foi iniciada.`;
     if (adminNotes && adminNotes.trim()) {
       approvalContent += `\n\n📝 *[INSTRUÇÕES ADICIONAIS DA GESTÃO]*:\n${adminNotes.trim()}`;
     }
@@ -1201,10 +1201,10 @@ export class TicketStore {
       createdAt: new Date().toISOString(),
     });
 
-    // 2. Production step: ENTROU EM PRODUÇÃO (status = in_production)
+    // Legacy in_production status means approved/queued at 0%; actual execution requires dispatch acknowledgement.
     ticket.status = 'in_production';
     ticket.progressPercentage = 0;
-    ticket.progressStep = '⚡ Entrada em Produção autorizada. Robô autônomo aguardando execução...';
+    ticket.progressStep = 'Aprovação registrada. Aguardando confirmação de início pelo operador local.';
     ticket.messages.push({
       id: `msg-prod-${Date.now() + 1}`,
       ticketId: ticket.id,
@@ -1212,7 +1212,7 @@ export class TicketStore {
       senderName: 'Pipeline de Produção Vercel',
       senderRole: 'agent',
       isInternalNote: false,
-      content: `⚡ *[ENTROU EM PRODUÇÃO]*: O robô autônomo iniciou o processamento do código e o envio para a nuvem Vercel (${ticket.tenantName || 'Public Arte'}). Acompanhe o progresso da compilação e verificação de deploy...`,
+      content: `🕒 *[APROVAÇÃO REGISTRADA]*: Chamado autorizado e aguardando despacho controlado para execução local (${ticket.tenantName || 'Public Arte'}). Nenhum build ou deploy é iniciado automaticamente pela aprovação.`,
       createdAt: new Date().toISOString(),
     });
 
@@ -1225,7 +1225,7 @@ export class TicketStore {
       authorized: true,
       progressPercentage: 0,
       status: 'in_production',
-      note: `Aprovação concedida pelo Administrador HelpUS (${agentName}). Autorizando envio para produção...`,
+      note: `Aprovação registrada pelo Administrador HelpUS (${agentName}); aguardando despacho de execução.`,
       timestamp: new Date().toISOString(),
       seq: (ticket.events?.length || 0) + 1,
     };
@@ -1239,7 +1239,7 @@ export class TicketStore {
       this.save();
       notificationService.notifyTicketUpdated(
         ticket,
-        `⚡ Solicitação Aprovada! O chamado [${ticket.code}] ENTROU EM PRODUÇÃO e o robô está realizando os deploys na nuvem.`
+        `✅ Solicitação [${ticket.code}] aprovada e aguardando início de execução confirmado.`
       );
     }
 
@@ -1277,7 +1277,7 @@ export class TicketStore {
     this.save();
     notificationService.notifyTicketUpdated(
       ticket,
-      `⚡ Solicitação Aprovada! O chamado [${ticket.code}] ENTROU EM PRODUÇÃO e o robô está realizando os deploys na nuvem.`
+      `✅ Solicitação [${ticket.code}] aprovada e aguardando início de execução confirmado.`
     );
 
     return { ticket, cloudSaveResult };
@@ -1365,6 +1365,8 @@ export class TicketStore {
     percentage: number,
     stepMessage: string
   ): Promise<Ticket | undefined> {
+    // Snapshot BEFORE mutations: restore the original ticket if shared persistence fails.
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
     const ticket = this.getTicketById(ticketId);
     if (!ticket) return undefined;
 
@@ -1385,8 +1387,6 @@ export class TicketStore {
         createdAt: new Date().toISOString(),
       });
     }
-
-    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
 
     const prgEvt: TicketEvent = {
       id: `evt-prg-${Date.now()}-${percentage}`,

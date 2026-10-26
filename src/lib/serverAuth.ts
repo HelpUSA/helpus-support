@@ -25,7 +25,9 @@ export const AUTHORIZED_SUPERADMIN_EMAILS = [
 export function getSessionSecret(): string {
   const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET || process.env.SUPERADMIN_SECRET;
   if (!secret) {
-    if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+    // Durante a fase de build do Next.js (prerender / coleta de rotas estáticas), usa chave efêmera descartável
+    const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build' || Boolean(process.env.NEXT_BUILD);
+    if ((process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') && !isBuildPhase) {
       throw new Error('[SECURITY FATAL] SESSION_SECRET não configurado em ambiente de produção.');
     }
     return (globalThis as any).__EPHEMERAL_SESSION_SECRET || ((globalThis as any).__EPHEMERAL_SESSION_SECRET = crypto.randomBytes(32).toString('hex'));
@@ -36,7 +38,8 @@ export function getSessionSecret(): string {
 export function getEventHmacSecret(): string {
   const secret = process.env.EVENT_HMAC_SECRET || process.env.TICKET_EVENT_SECRET;
   if (!secret) {
-    if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+    const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build' || Boolean(process.env.NEXT_BUILD);
+    if ((process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') && !isBuildPhase) {
       throw new Error('[SECURITY FATAL] EVENT_HMAC_SECRET não configurado em ambiente de produção.');
     }
     return (globalThis as any).__EPHEMERAL_EVENT_SECRET || ((globalThis as any).__EPHEMERAL_EVENT_SECRET = crypto.randomBytes(32).toString('hex'));

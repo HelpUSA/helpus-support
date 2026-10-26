@@ -22,3 +22,4 @@ open_window_titles.txt
 portal_live_test.png
 
 .temp_build/
+.temp/

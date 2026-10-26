@@ -199,13 +199,19 @@ assert.equal(integrityFuture.reason, 'future_timestamp_rejected');
 console.log('✅ PASS: P0-A: verifyTicketEventIntegrity rejeita eventos com timestamps futuros (skew)');
 
 // ---------------------------------------------------------------------------
-// Teste 1E: P0-A - Fail-Closed em Produção sem Segredo HMAC
+// Teste 1E: P0-A - Fail-Closed Estrito em Produção para Ambos os Segredos
 // ---------------------------------------------------------------------------
 const savedSecret = process.env.EVENT_HMAC_SECRET;
+const savedSession = process.env.SESSION_SECRET;
 const savedEnv = process.env.NODE_ENV;
+const savedPhase = process.env.NEXT_PHASE;
 try {
   delete process.env.EVENT_HMAC_SECRET;
   delete process.env.TICKET_EVENT_SECRET;
+  delete process.env.SESSION_SECRET;
+  delete process.env.AUTH_SECRET;
+  delete process.env.SUPERADMIN_SECRET;
+  delete process.env.NEXT_PHASE;
   process.env.NODE_ENV = 'production';
 
   assert.throws(
@@ -214,10 +220,18 @@ try {
     },
     /\[SECURITY FATAL\] EVENT_HMAC_SECRET não configurado em ambiente de produção/
   );
-  console.log('✅ PASS: P0-A: getEventHmacSecret falha estritamente de forma segura (fail-closed) em produção sem chave');
+  assert.throws(
+    () => {
+      getSessionSecret();
+    },
+    /\[SECURITY FATAL\] SESSION_SECRET não configurado em ambiente de produção/
+  );
+  console.log('✅ PASS: P0-A: getEventHmacSecret e getSessionSecret falham estritamente de forma segura (fail-closed) em runtime de produção');
 } finally {
   process.env.EVENT_HMAC_SECRET = savedSecret;
+  process.env.SESSION_SECRET = savedSession;
   process.env.NODE_ENV = savedEnv;
+  if (savedPhase) process.env.NEXT_PHASE = savedPhase;
 }
 
 // ---------------------------------------------------------------------------

@@ -26,8 +26,13 @@ jobs:
 
       - name: Run Test Suites (Watcher & Store)
         run: npm test
+        env:
+          EVENT_HMAC_SECRET: 'ci_event_hmac_secret_32_bytes_test_key_0123456789abcdef'
+          SESSION_SECRET: 'ci_session_secret_32_bytes_test_key_0123456789abcdef'
 
       - name: Next.js Production Build
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+          EVENT_HMAC_SECRET: 'ci_event_hmac_secret_32_bytes_test_key_0123456789abcdef'
+          SESSION_SECRET: 'ci_session_secret_32_bytes_test_key_0123456789abcdef'

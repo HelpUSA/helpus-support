@@ -14,7 +14,9 @@ export function sandboxApprovalGate(env: NodeJS.ProcessEnv): SandboxGate {
   if (env.HELPUS_STAGING_APPROVAL_ENABLED !== '1' ||
       env.HELPUS_STAGING_ISOLATED_MODE !== '1' ||
       env.HELPUS_STAGING_DEPLOYMENT !== 'sandbox' ||
-      env.VERCEL_ENV === 'production') {
+      env.HELPUS_STAGING_APPROVAL_TRANSPORT !== 'loopback' ||
+      env.NODE_ENV !== 'development' ||
+      env.VERCEL === '1' || env.VERCEL_ENV !== 'preview') {
     return {ok:false,reason:'sandbox_approval_disabled'};
   }
   if (env.HELPUS_SANDBOX_DB_REPO !== SANDBOX_REPO ||
@@ -25,7 +27,10 @@ export function sandboxApprovalGate(env: NodeJS.ProcessEnv): SandboxGate {
   }
   const token=env.HELPUS_STAGING_GITHUB_TOKEN||'';
   const signingKey=env.HELPUS_STAGING_EVENT_HMAC_SECRET||'';
-  if(token.length<20 || signingKey.length<32 ||
+  const sessionKey=env.SESSION_SECRET||'';
+  if(token.length<20 || signingKey.length<32 || sessionKey.length<32 ||
+     sessionKey===signingKey || sessionKey===env.AUTH_SECRET ||
+     sessionKey===env.SUPERADMIN_SECRET ||
      token===env.GITHUB_TOKEN || token===env.GH_TOKEN ||
      signingKey===env.EVENT_HMAC_SECRET || signingKey===env.TICKET_EVENT_SECRET ||
      token.includes('\n') || signingKey.includes('\n')) {

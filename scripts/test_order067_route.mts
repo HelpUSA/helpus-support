@@ -7,6 +7,8 @@ const env={
   HELPUS_STAGING_APPROVAL_ENABLED:'1',
   HELPUS_STAGING_ISOLATED_MODE:'1',
   HELPUS_STAGING_DEPLOYMENT:'sandbox',
+  HELPUS_STAGING_APPROVAL_TRANSPORT:'loopback',
+  NODE_ENV:'development',VERCEL:'0',
   HELPUS_SANDBOX_DB_REPO:'HelpUSA/helpus-support-sandbox',
   HELPUS_SANDBOX_DB_PATH:'data/support_sbx_tickets.json',
   HELPUS_SANDBOX_DB_REF:'main',
@@ -49,7 +51,7 @@ globalThis.fetch=(async (url,options)=>{
 }) as typeof fetch;
 const token=signSessionToken({email:'helpus.ecommerce@gmail.com',role:'super_admin',
   tenantId:'all',allowedTenantIds:['all']},120);
-const request=(headers={})=>new Request('http://localhost/api/sandbox/tickets/SBX-E2E-063/approve',{
+const request=(headers={})=>new Request('http://127.0.0.1/api/sandbox/tickets/SBX-E2E-063/approve',{
   method:'POST',headers
 }) as any;
 const call=(req:any,id='SBX-E2E-063')=>POST(req,{params:Promise.resolve({id})});
@@ -59,6 +61,9 @@ try {
   response=await call(request({'authorization':'Bearer invalid'}));
   assert.equal(response.status,403);assert.equal(calls,0);
   response=await call(request({'authorization':'Bearer '+token,'x-superadmin-secret':'anything'}));
+  assert.equal(response.status,403);assert.equal(calls,0);
+  const nonLoopback=new Request('http://example.com/api/sandbox/tickets/SBX-E2E-063/approve',{method:'POST',headers:{authorization:'Bearer '+token}}) as any;
+  response=await call(nonLoopback);
   assert.equal(response.status,403);assert.equal(calls,0);
   response=await call(request({'authorization':'Bearer '+token}),'AID-101');
   assert.equal(response.status,404);assert.equal(calls,0);

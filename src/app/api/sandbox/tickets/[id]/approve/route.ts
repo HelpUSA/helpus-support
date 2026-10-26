@@ -17,6 +17,10 @@ export async function POST(request:NextRequest,
   const gate=sandboxApprovalGate(process.env);
   if(!gate.ok)return answer(503,'SANDBOX_APPROVAL_UNAVAILABLE',
     'Aprovacao desativada fora de um ambiente de homologacao isolado.');
+  // This staging endpoint is strictly localhost-only; never reachable via Vercel or LAN.
+  const hostname=new URL(request.url).hostname;
+  if(hostname!=='127.0.0.1')return answer(403,'LOOPBACK_HOST_REQUIRED',
+    'Aprovacao apenas no servidor local de homologacao.');
   const {id}=await params;
   if(id!==SANDBOX_TARGET)return answer(404,'SANDBOX_TICKET_ONLY','Chamado de homologacao nao autorizado.');
   // Bearer session only. Reject admin-secret and cookie-only calls; no CSRF path.

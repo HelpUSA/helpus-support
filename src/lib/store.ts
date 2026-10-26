@@ -434,6 +434,17 @@ export const INITIAL_TICKETS: Ticket[] = [
   }
 ];
 
+// P0-B (Ciclo 027): Assinatura canônica obrigatória de eventos de seed estáticos
+for (const t of INITIAL_TICKETS) {
+  if (Array.isArray(t.events)) {
+    for (const e of t.events) {
+      if (!e.signature) {
+        e.signature = signTicketEvent(e);
+      }
+    }
+  }
+}
+
 function getGitHubToken(): string {
   return (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
 }
@@ -916,9 +927,6 @@ export class TicketStore {
     return new Promise((resolve) => {
       this.writeQueue = this.writeQueue.then(async () => {
         try {
-          const filePath = this.getStoragePath();
-          const localOk = this.atomicSaveSync(filePath, this.tickets);
-
           let cloudResult: { success: boolean; error?: string } = { success: true };
           const isServerlessOrProd = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production');
           const token = getGitHubToken();
@@ -938,10 +946,15 @@ export class TicketStore {
             }
             if (!cloudResult.success) {
               console.error(`[STORE CRITICAL] Falha na persistencia compartilhada remota: ${cloudResult.error}. Operacao rejeitada para evitar falso sucesso.`);
+              // P1: Em caso de falha remota, o disco local NUNCA é poluído com mutação não confirmada
               resolve({ success: false, error: cloudResult.error || 'Shared cloud persistence failed' });
               return;
             }
           }
+
+          // P1: A gravação em disco local ocorre SOMENTE após a confirmação de persistência na nuvem
+          const filePath = this.getStoragePath();
+          const localOk = this.atomicSaveSync(filePath, this.tickets);
 
           if (!localOk && !token) {
             resolve({ success: false, error: 'Local file persistence failed and no cloud token configured' });

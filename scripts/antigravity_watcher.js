@@ -2,13 +2,59 @@ const fs = require('fs');
 const path = require('path');
 
 const crypto = require('crypto');
-const SERVER_AUTH_SECRET = process.env.SERVER_AUTH_SECRET || 'helpus-superadmin-session-secret-2026-fallback-dev';
 
-function signTicketEvent(event) {
-  const payload = `${event.id}:${event.ticketId}:${event.type}:${event.timestamp}:${event.actorEmail}:${event.actorRole}:${event.status}:${event.progressPercentage}:${event.seq || 0}`;
-  return crypto.createHmac('sha256', SERVER_AUTH_SECRET).update(payload).digest('hex');
+// P0-A (Ciclo 027): Eliminação total de segredo estático fallback no repositório.
+// Fail-closed em produção/Vercel. Chave efêmera aleatória em dev/test.
+function getEventHmacSecret() {
+  const secret = process.env.EVENT_HMAC_SECRET || process.env.TICKET_EVENT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+      throw new Error('[SECURITY FATAL] EVENT_HMAC_SECRET não configurado em ambiente de produção.');
+    }
+    return global.__EPHEMERAL_WATCHER_EVENT_SECRET || (global.__EPHEMERAL_WATCHER_EVENT_SECRET = crypto.randomBytes(32).toString('hex'));
+  }
+  return secret;
 }
 
+function safeTimingEqual(a, b) {
+  if (!a || !b) return false;
+  try {
+    const bufA = Buffer.isBuffer(a) ? a : Buffer.from(a, 'hex');
+    const bufB = Buffer.isBuffer(b) ? b : Buffer.from(b, 'hex');
+    if (bufA.length !== bufB.length || bufA.length === 0) return false;
+    return crypto.timingSafeEqual(bufA, bufB);
+  } catch {
+    return false;
+  }
+}
+
+// P0-C (Ciclo 027): Cálculo canônico idêntico ao servidor para cobertura integral de governança
+function computeEventPayload(event) {
+  const parts = [
+    event.id,
+    event.ticketId,
+    event.tenantId || '',
+    event.type,
+    event.status,
+    event.progressPercentage ?? 0,
+    event.actorEmail || '',
+    event.actorRole || '',
+    event.timestamp,
+    event.seq ?? 0,
+    event.idempotencyKey || '',
+    event.note || '',
+    event.authorized ? 'auth:true' : 'auth:false',
+  ];
+  return parts.join('|');
+}
+
+function signTicketEvent(event) {
+  const secret = getEventHmacSecret();
+  const payload = computeEventPayload(event);
+  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+// P0-B (Ciclo 027): Verificação com ZERO bypass por prefixo de ID e comparação constant-time
 function verifyTicketEventIntegrity(event, maxFutureSkewMs = 60000, referenceNowMs = Date.now()) {
   if (!event || !event.id || !event.type || !event.timestamp) {
     return { valid: false, reason: 'missing_fields' };
@@ -25,14 +71,13 @@ function verifyTicketEventIntegrity(event, maxFutureSkewMs = 60000, referenceNow
       return { valid: false, reason: 'invalid_role_for_master_event' };
     }
   }
-  if (event.id.startsWith('evt-aid-') || event.id.startsWith('evt-init-') || event.id.startsWith('evt-test-seed-')) {
-    return { valid: true };
-  }
-  if (!event.signature) {
+
+  // P0-B: Zero bypass por prefixo de ID!
+  if (!event.signature || typeof event.signature !== 'string') {
     return { valid: false, reason: 'missing_server_signature' };
   }
   const expectedSig = signTicketEvent(event);
-  if (event.signature !== expectedSig) {
+  if (!safeTimingEqual(event.signature, expectedSig)) {
     return { valid: false, reason: 'tampered_signature' };
   }
   return { valid: true };

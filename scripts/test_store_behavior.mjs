@@ -1,9 +1,13 @@
 // scripts/test_store_behavior.mjs
-// Teste comportamental de resiliência, concorrência e integridade do store.ts (Quinta Auditoria / Ciclo 025-026)
+// Teste comportamental de resiliência, concorrência e integridade do store.ts (Ciclo 027 - HMAC Hardening & Atomic Rollback)
+
+process.env.EVENT_HMAC_SECRET = process.env.EVENT_HMAC_SECRET || 'test_secret_for_automated_suites_32_bytes_hex_abcdef0123456789';
+process.env.SESSION_SECRET = process.env.SESSION_SECRET || 'test_session_secret_32_bytes_hex_abcdef0123456789';
 
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { mergeTicketsGranular, TicketStore } from '../src/lib/store.ts';
-import { signTicketEvent, verifyTicketEventIntegrity } from '../src/lib/serverAuth.ts';
+import { signTicketEvent, verifyTicketEventIntegrity, getEventHmacSecret, getSessionSecret } from '../src/lib/serverAuth.ts';
 
 function makeSignedEvent(evt) {
   const event = { ...evt, seq: evt.seq || 1 };
@@ -12,7 +16,7 @@ function makeSignedEvent(evt) {
 }
 
 console.log('='.repeat(70));
-console.log('TESTES DE INTEGRIDADE DO STORE (store.ts) - CICLO 025 / 026 (P0-A & P0-B)');
+console.log('TESTES DE INTEGRIDADE DO STORE (store.ts) - CICLO 027 (HMAC HARDENING)');
 console.log('='.repeat(70));
 
 // ---------------------------------------------------------------------------
@@ -132,9 +136,9 @@ assert.equal(mergedLegit[0].events.length, 2, 'Histórico completo de eventos de
 console.log('✅ PASS: P0-01: store.ts mergeTicketsGranular preserva reabertura legítima via evento estruturado autorizado');
 
 // ---------------------------------------------------------------------------
-// Teste 1C: P0-A - Rejeição Criptográfica de Eventos Forjados ou Não Autorizados
+// Teste 1C: P0-A & P0-B - Rejeição de Evento Malicioso com Prefixo evt-aid- (Zero Bypass)
 // ---------------------------------------------------------------------------
-const forgedEventSnapshot = {
+const maliciousPrefixedSnapshot = {
   id: 'T-ADV-1',
   code: 'T-ADV-1',
   tenantId: 'aidoctor',
@@ -155,12 +159,12 @@ const forgedEventSnapshot = {
       timestamp: '2026-10-25T20:00:00.000Z'
     }),
     {
-      id: 'evt-fake-reset',
+      id: 'evt-aid-malicious-bypass-attempt',
       ticketId: 'T-ADV-1',
       type: 'ticket_reset_by_master',
-      actorEmail: 'attacker@evil.com',
-      actorRole: 'client',
-      authorized: true,
+      actorEmail: 'master.superadmin@helpusbr.com',
+      actorRole: 'master_superadmin',
+      authorized: true, // Tentativa de bypass por flag e prefixo
       progressPercentage: 0,
       status: 'pending_approval',
       timestamp: '2026-10-25T20:25:00.000Z',
@@ -169,13 +173,13 @@ const forgedEventSnapshot = {
   ]
 };
 
-const mergedForged = mergeTicketsGranular([resolvedWithEvent], [forgedEventSnapshot]);
-assert.equal(mergedForged[0].status, 'resolved', 'Evento forjado sem assinatura HMAC válida DEVE ser sumariamente descartado');
+const mergedForged = mergeTicketsGranular([resolvedWithEvent], [maliciousPrefixedSnapshot]);
+assert.equal(mergedForged[0].status, 'resolved', 'P0-B ZERO BYPASS: Evento com prefixo evt-aid- sem HMAC DEVE ser sumariamente descartado');
 assert.equal(mergedForged[0].events.length, 1, 'Apenas o evento legítimo assinado deve ser retido');
-console.log('✅ PASS: P0-A: store.ts descarta eventos forjados e sem assinatura HMAC na reconciliação causal');
+console.log('✅ PASS: P0-B: store.ts rejeita eventos maliciosos mesmo com prefixo evt-aid- ou flag authorized:true quando falta HMAC');
 
 // ---------------------------------------------------------------------------
-// Teste 1D: P0-A - Rejeição de Eventos com Timestamp no Futuro
+// Teste 1D: P0-A - Rejeição de Eventos com Timestamp no Futuro (Clock Skew > 60s)
 // ---------------------------------------------------------------------------
 const futureEvt = makeSignedEvent({
   id: 'evt-future-skew',
@@ -193,6 +197,28 @@ const integrityFuture = verifyTicketEventIntegrity(futureEvt);
 assert.equal(integrityFuture.valid, false, 'Eventos com timestamp futuro devem ser rejeitados');
 assert.equal(integrityFuture.reason, 'future_timestamp_rejected');
 console.log('✅ PASS: P0-A: verifyTicketEventIntegrity rejeita eventos com timestamps futuros (skew)');
+
+// ---------------------------------------------------------------------------
+// Teste 1E: P0-A - Fail-Closed em Produção sem Segredo HMAC
+// ---------------------------------------------------------------------------
+const savedSecret = process.env.EVENT_HMAC_SECRET;
+const savedEnv = process.env.NODE_ENV;
+try {
+  delete process.env.EVENT_HMAC_SECRET;
+  delete process.env.TICKET_EVENT_SECRET;
+  process.env.NODE_ENV = 'production';
+
+  assert.throws(
+    () => {
+      getEventHmacSecret();
+    },
+    /\[SECURITY FATAL\] EVENT_HMAC_SECRET não configurado em ambiente de produção/
+  );
+  console.log('✅ PASS: P0-A: getEventHmacSecret falha estritamente de forma segura (fail-closed) em produção sem chave');
+} finally {
+  process.env.EVENT_HMAC_SECRET = savedSecret;
+  process.env.NODE_ENV = savedEnv;
+}
 
 // ---------------------------------------------------------------------------
 // Teste 2: saveAsync rejeita falso sucesso se persistência compartilhada em nuvem falhar
@@ -221,9 +247,8 @@ assert.equal(prodNoTokenResult.error, 'SHARED_BACKEND_UNAVAILABLE_IN_PRODUCTION'
 console.log('✅ PASS: P0-C: store.ts saveAsync falha explicitamente em ambiente Vercel sem backend durável compartilhado');
 
 // ---------------------------------------------------------------------------
-// Teste 4: P0-02 / P0-B - Métodos de Mutação e Rollback Atômico em Falha de Persistência
+// Teste 4: P0-B & P1 - Métodos de Mutação, Rollback Atômico e Isolamento de Disco Local
 // ---------------------------------------------------------------------------
-// Inserir ticket prévio com status estável
 const baselineTicket = {
   id: 'tck-atomic-test-1',
   code: 'TCK-ATOMIC-1',
@@ -241,8 +266,6 @@ const baselineTicket = {
 storeProdNoToken.tickets = [JSON.parse(JSON.stringify(baselineTicket))];
 
 // 4.1 Teste de startTicketProductionAsync sob falha:
-// Deve retornar { ticket: undefined, cloudSaveResult: { success: false } }
-// O cache em memória DEVE reverter para pending_approval e 0% (rollback atômico)
 const startRes = await storeProdNoToken.startTicketProductionAsync('tck-atomic-test-1');
 assert.equal(startRes.ticket, undefined, 'P0-B: startTicketProductionAsync DEVE retornar undefined sob falha de persistência');
 assert.equal(startRes.cloudSaveResult.success, false);
@@ -254,7 +277,6 @@ assert.equal(ticketAfterFailedStart.events.length, 0, 'P0-B ROLLBACK: Nenhum eve
 console.log('✅ PASS: P0-B: startTicketProductionAsync executa rollback atômico do cache em memória quando persistência remota falha');
 
 // 4.2 Teste de completeTicketProductionAsync sob falha:
-// Colocar ticket em in_production no baseline
 storeProdNoToken.tickets[0].status = 'in_production';
 storeProdNoToken.tickets[0].progressPercentage = 50;
 
@@ -291,5 +313,5 @@ assert.equal(ticketAfterFailedReopen.progressPercentage, 100, 'P0-B ROLLBACK: Pr
 console.log('✅ PASS: P0-B: reopenTicketAsync executa rollback atômico do cache em memória sob falha remota');
 
 console.log('='.repeat(70));
-console.log('TODOS OS TESTES DE INTEGRIDADE, P0-A E P0-B DO STORE FORAM APROVADOS (10/10)!');
+console.log('TODOS OS TESTES DE INTEGRIDADE, P0-A, P0-B, P0-C E P1 DO STORE APROVADOS (11/11)!');
 console.log('='.repeat(70));

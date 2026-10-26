@@ -2,6 +2,8 @@
 // Suite Completa de Testes Comportamentais com Mocks de Rede (Quarta Auditoria PR #1)
 // Atende integralmente às exigências da Quarta Auditoria Independente (Issue Comment 6405811322)
 
+process.env.EVENT_HMAC_SECRET = process.env.EVENT_HMAC_SECRET || 'test_secret_for_automated_suites_32_bytes_hex_abcdef0123456789';
+
 import assert from 'node:assert/strict';
 import {
   TENANTS,
@@ -659,6 +661,36 @@ await test('P0-A: verifyTicketEventIntegrity rejeita papel não autorizado para 
   const checkRole = verifyTicketEventIntegrity(spoofedRoleEvent);
   assert.equal(checkRole.valid, false);
   assert.equal(checkRole.reason, 'invalid_role_for_master_event');
+});
+
+
+// ---------------------------------------------------------------------------
+// TESTE P0-B: Rejeição Estrita de Bypass por Prefixo (evt-aid-, evt-init-, evt-test-seed-)
+// ---------------------------------------------------------------------------
+await test('P0-B: verifyTicketEventIntegrity rejeita eventos maliciosos com prefixos evt-aid- ou evt-init- sem HMAC válido', () => {
+  const maliciousEvtAid = {
+    id: 'evt-aid-malicious',
+    ticketId: 'AID-101',
+    type: 'master_approved',
+    actorEmail: 'master.superadmin@helpusbr.com',
+    actorRole: 'master_superadmin',
+    authorized: true,
+    progressPercentage: 0,
+    status: 'in_production',
+    timestamp: new Date().toISOString()
+  };
+  const res1 = verifyTicketEventIntegrity(maliciousEvtAid);
+  assert.equal(res1.valid, false, 'evt-aid- sem assinatura DEVE ser sumariamente rejeitado');
+  assert.equal(res1.reason, 'missing_server_signature');
+
+  const maliciousEvtInit = {
+    ...maliciousEvtAid,
+    id: 'evt-init-fake',
+    signature: 'badc0ffeedeadbeef0123456789abcdef0123456789abcdef0123456789abcdef'
+  };
+  const res2 = verifyTicketEventIntegrity(maliciousEvtInit);
+  assert.equal(res2.valid, false, 'evt-init- com assinatura adulterada DEVE ser sumariamente rejeitado');
+  assert.equal(res2.reason, 'tampered_signature');
 });
 
 // TESTE 13: Rejeição Estrita de Tenant Desconhecido (P1-01)

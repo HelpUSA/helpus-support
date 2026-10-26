@@ -20,11 +20,29 @@ export const AUTHORIZED_SUPERADMIN_EMAILS = [
  * 5. Projeção server-side (DTO): notas internas e instruções de admin são filtradas para clientes.
  */
 
-// Chave secreta de assinatura. Em produção deve vir obrigatoriamente de process.env.
-const SERVER_AUTH_SECRET =
-  process.env.AUTH_SECRET ||
-  process.env.SUPERADMIN_SECRET ||
-  'helpus_auth_hmac_sha256_internal_server_key_2026_secure';
+// P0-A (Ciclo 027): Separação de segredos por finalidade e eliminação de segredos hardcoded.
+// Em produção/Vercel: fail-closed estrito. Em dev/test: segredo efêmero aleatório gerado por processo.
+export function getSessionSecret(): string {
+  const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET || process.env.SUPERADMIN_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+      throw new Error('[SECURITY FATAL] SESSION_SECRET não configurado em ambiente de produção.');
+    }
+    return (globalThis as any).__EPHEMERAL_SESSION_SECRET || ((globalThis as any).__EPHEMERAL_SESSION_SECRET = crypto.randomBytes(32).toString('hex'));
+  }
+  return secret;
+}
+
+export function getEventHmacSecret(): string {
+  const secret = process.env.EVENT_HMAC_SECRET || process.env.TICKET_EVENT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+      throw new Error('[SECURITY FATAL] EVENT_HMAC_SECRET não configurado em ambiente de produção.');
+    }
+    return (globalThis as any).__EPHEMERAL_EVENT_SECRET || ((globalThis as any).__EPHEMERAL_EVENT_SECRET = crypto.randomBytes(32).toString('hex'));
+  }
+  return secret;
+}
 
 export interface SessionPayload {
   userId: string;
@@ -127,7 +145,7 @@ export function signSessionToken(
   };
 
   const payloadB64 = toBase64Url(JSON.stringify(fullPayload));
-  const hmac = crypto.createHmac('sha256', SERVER_AUTH_SECRET);
+  const hmac = crypto.createHmac('sha256', getSessionSecret());
   hmac.update(`v1.${payloadB64}`);
   const sigB64 = digestBase64Url(hmac);
 
@@ -149,7 +167,7 @@ export function verifySessionToken(tokenString: string): SessionPayload | null {
   const [, payloadB64, sigB64] = parts;
 
   // 1. Recalcula a assinatura HMAC esperada
-  const hmac = crypto.createHmac('sha256', SERVER_AUTH_SECRET);
+  const hmac = crypto.createHmac('sha256', getSessionSecret());
   hmac.update(`v1.${payloadB64}`);
   const expectedSigB64 = digestBase64Url(hmac);
 
@@ -310,17 +328,42 @@ export function projectTicketListForUser(tickets: Ticket[], isSuperAdmin: boolea
 
 
 /**
- * P0-A (Auditoria Complementar Ciclo 023/024):
- * Assinatura criptográfica HMAC-SHA256 para eventos de governança de ciclo de vida.
+ * P0-C (Auditoria Ciclo 027):
+ * Cálculo canônico de payload cobrindo 100% dos campos de governança do TicketEvent.
  */
-export function signTicketEvent(event: Omit<TicketEvent, 'signature'>): string {
-  const payload = `${event.id}:${event.ticketId}:${event.type}:${event.timestamp}:${event.actorEmail}:${event.actorRole}:${event.status}:${event.progressPercentage}:${event.seq || 0}`;
-  return crypto.createHmac('sha256', SERVER_AUTH_SECRET).update(payload).digest('hex');
+export function computeEventPayload(event: Omit<TicketEvent, 'signature'>): string {
+  const parts = [
+    event.id,
+    event.ticketId,
+    (event as any).tenantId || '',
+    event.type,
+    event.status,
+    event.progressPercentage ?? 0,
+    event.actorEmail || '',
+    event.actorRole || '',
+    event.timestamp,
+    event.seq ?? 0,
+    event.idempotencyKey || '',
+    event.note || '',
+    event.authorized ? 'auth:true' : 'auth:false',
+  ];
+  return parts.join('|');
 }
 
 /**
- * P0-A: Verificação rigorosa de integridade, proveniência e temporalidade do TicketEvent.
- * Rejeita eventos forjados, sem assinatura do servidor, com papeis incompatíveis ou com timestamps futuros.
+ * P0-A & P0-C: Assinatura criptográfica HMAC-SHA256 usando chave dedicada EVENT_HMAC_SECRET.
+ */
+export function signTicketEvent(event: Omit<TicketEvent, 'signature'>): string {
+  const secret = getEventHmacSecret();
+  const payload = computeEventPayload(event);
+  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+/**
+ * P0-A, P0-B & P0-C: Verificação rigorosa de integridade, proveniência e temporalidade do TicketEvent.
+ * - Zero bypass: eventos com IDs prefixados (evt-aid-, etc.) DEVEM possuir assinatura HMAC válida.
+ * - Rejeição estrita de timestamps futuros (skew > 60s).
+ * - Comparação segura constant-time via timingSafeEqual.
  */
 export function verifyTicketEventIntegrity(
   event: TicketEvent,
@@ -371,25 +414,20 @@ export function verifyTicketEventIntegrity(
     }
   }
 
-  // 3. Verificação de proveniência por assinatura criptográfica HMAC
-  // Permite eventos de bootstrap das sementes estáticas documentadas
-  if (
-    event.id.startsWith('evt-aid-') ||
-    event.id.startsWith('evt-init-') ||
-    event.id.startsWith('evt-test-seed-')
-  ) {
-    return { valid: true };
-  }
-
-  if (!event.signature) {
+  // 3. P0-B: Zero bypass por prefixo de ID! Assinatura HMAC é estritamente obrigatória para TODOS os eventos.
+  if (!event.signature || typeof event.signature !== 'string') {
     return { valid: false, reason: 'missing_server_signature' };
   }
 
-  const expectedSig = signTicketEvent(event);
-  const sigBuf = Buffer.from(event.signature);
-  const expBuf = Buffer.from(expectedSig);
-  if (!safeTimingEqual(sigBuf, expBuf)) {
-    return { valid: false, reason: 'tampered_signature' };
+  try {
+    const expectedSig = signTicketEvent(event);
+    const sigBuf = Buffer.from(event.signature, 'hex');
+    const expBuf = Buffer.from(expectedSig, 'hex');
+    if (!safeTimingEqual(sigBuf, expBuf)) {
+      return { valid: false, reason: 'tampered_signature' };
+    }
+  } catch (err: any) {
+    return { valid: false, reason: 'crypto_verification_failed' };
   }
 
   return { valid: true };

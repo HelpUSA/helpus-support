@@ -234,6 +234,7 @@ console.log('✅ PASS: Ordem 035 - service_worker estritamente restrito a tenant
 const cycleStorage = new MockStorage();
 const mockCycleDeps = {
   claimsStorage: cycleStorage,
+  serviceWorkerToken: 'mock_service_worker_token',
   fetch: async (url) => {
     // Retorna base simulada com 1 ticket em produção retido para homologação
     return {

@@ -94,10 +94,146 @@ function verifyTicketEventIntegrity(event, maxFutureSkewMs = 60000, referenceNow
   return { valid: true };
 }
 
-// P0-01: Zero credenciais hardcoded. Exclusivamente process.env.
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
-const DB_REPO = process.env.HELPUS_DB_REPO || 'HelpUSA/publicarte';
-const DB_PATH = process.env.HELPUS_DB_PATH || 'data/helpus_tickets.json';
+// P0-01 & Ordem 041: Resolução segura de credencial de serviço de menor privilégio.
+// Ordem de precedência:
+// 1. deps.serviceWorkerToken / deps.githubToken (injeção explícita de teste/sandbox)
+// 2. process.env.SERVICE_WORKER_GITHUB_TOKEN (token de serviço com escopo Contents:read/write restrito)
+// 3. process.env.GITHUB_TOKEN / process.env.GH_TOKEN
+// Fail-closed: Se ausente, retorna null e bloqueia chamadas não autenticadas para proteger cotas do host.
+function resolveServiceWorkerToken(deps = {}) {
+  if (deps.serviceWorkerToken && typeof deps.serviceWorkerToken === "string") {
+    return deps.serviceWorkerToken.trim();
+  }
+  if (deps.githubToken && typeof deps.githubToken === "string") {
+    return deps.githubToken.trim();
+  }
+  const env = deps.env || process.env;
+  const token = (
+    env.SERVICE_WORKER_GITHUB_TOKEN ||
+    env.GITHUB_TOKEN ||
+    env.GH_TOKEN ||
+    ""
+  ).trim();
+  return token || null;
+}
+
+function inspectTokenMetadata(token) {
+  if (!token || typeof token !== "string") {
+    return { configured: false, kind: "none", length: 0 };
+  }
+  const clean = token.trim();
+  let kind = "custom_token";
+  if (clean.startsWith("ghp_")) kind = "personal_access_token_classic";
+  else if (clean.startsWith("github_pat_")) kind = "fine_grained_pat";
+  else if (clean.startsWith("gho_")) kind = "oauth_token";
+  else if (clean.startsWith("ghs_")) kind = "installation_token";
+
+  return {
+    configured: true,
+    kind,
+    length: clean.length,
+    prefix: clean.slice(0, 4) + "...",
+  };
+}
+
+// Ordem 041: Motor de controle de Rate Limit, escopos e backoff adaptativo
+const rateLimitState = {
+  limit: null,
+  remaining: null,
+  resetEpochSec: null,
+  backoffUntilMs: 0,
+  consecutiveFailures: 0,
+  lastStatus: null,
+  detectedScopes: [],
+};
+
+function getRateLimitState() {
+  return { ...rateLimitState };
+}
+
+function resetRateLimitState() {
+  rateLimitState.limit = null;
+  rateLimitState.remaining = null;
+  rateLimitState.resetEpochSec = null;
+  rateLimitState.backoffUntilMs = 0;
+  rateLimitState.consecutiveFailures = 0;
+  rateLimitState.lastStatus = null;
+  rateLimitState.detectedScopes = [];
+}
+
+function isRateLimitBackoffActive(now = Date.now()) {
+  return rateLimitState.backoffUntilMs > now;
+}
+
+function updateRateLimitFromResponse(res, now = Date.now()) {
+  if (!res) return;
+  const getHeader = (name) => {
+    if (res.headers && typeof res.headers.get === "function") {
+      return res.headers.get(name);
+    }
+    if (res.headers && typeof res.headers === "object") {
+      return res.headers[name.toLowerCase()] || res.headers[name] || null;
+    }
+    return null;
+  };
+
+  const limitHeader = getHeader("x-ratelimit-limit");
+  const remainingHeader = getHeader("x-ratelimit-remaining");
+  const resetHeader = getHeader("x-ratelimit-reset");
+  const retryAfterHeader = getHeader("retry-after");
+  const scopesHeader = getHeader("x-oauth-scopes");
+
+  if (limitHeader != null) {
+    const l = parseInt(limitHeader, 10);
+    if (!isNaN(l)) rateLimitState.limit = l;
+  }
+  if (remainingHeader != null) {
+    const r = parseInt(remainingHeader, 10);
+    if (!isNaN(r)) rateLimitState.remaining = r;
+  }
+  if (resetHeader != null) {
+    const r = parseInt(resetHeader, 10);
+    if (!isNaN(r)) rateLimitState.resetEpochSec = r;
+  }
+  if (scopesHeader != null && typeof scopesHeader === "string") {
+    rateLimitState.detectedScopes = scopesHeader.split(",").map((s) => s.trim()).filter(Boolean);
+  }
+
+  rateLimitState.lastStatus = res.status;
+
+  const isRateLimited = res.status === 429 || (res.status === 403 && rateLimitState.remaining === 0);
+
+  if (isRateLimited || res.status === 403) {
+    rateLimitState.consecutiveFailures++;
+    let waitMs = 15000;
+
+    if (retryAfterHeader) {
+      const parsedRetry = parseInt(retryAfterHeader, 10);
+      if (!isNaN(parsedRetry) && parsedRetry > 0) {
+        waitMs = parsedRetry * 1000;
+      }
+    } else if (rateLimitState.resetEpochSec) {
+      const msUntilReset = (rateLimitState.resetEpochSec * 1000) - now;
+      if (msUntilReset > 0) {
+        waitMs = Math.min(msUntilReset + 2000, 3600000);
+      } else {
+        waitMs = 15000;
+      }
+    } else {
+      waitMs = Math.min(10000 * Math.pow(2, Math.max(0, rateLimitState.consecutiveFailures - 1)), 120000);
+    }
+
+    rateLimitState.backoffUntilMs = now + waitMs;
+    console.warn("[WATCHDOG RATE_LIMIT] GitHub API respondeu HTTP " + res.status + " (remaining: " + (rateLimitState.remaining ?? "N/A") + "). Backoff ativado por " + Math.round(waitMs / 1000) + "s.");
+  } else if (res.ok) {
+    rateLimitState.consecutiveFailures = 0;
+    rateLimitState.backoffUntilMs = 0;
+  }
+}
+
+const GITHUB_TOKEN = process.env.SERVICE_WORKER_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
+const DB_REPO = process.env.HELPUS_DB_REPO || "HelpUSA/publicarte";
+const DB_PATH = process.env.HELPUS_DB_PATH || "data/helpus_tickets.json";
 
 // P1-01: Mapa completo de tenants suportados oficialmente pela plataforma HelpUS
 const TENANTS = {
@@ -283,7 +419,7 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
 }
 
 async function getGitHubHeaders(deps = {}) {
-  const token = (deps.githubToken || GITHUB_TOKEN || '').trim();
+  const token = resolveServiceWorkerToken(deps);
   const headers = {
     'User-Agent': 'Antigravity-Watchdog',
     'Accept': 'application/vnd.github+json'
@@ -353,15 +489,41 @@ async function safeParseHttpResponse(res, context = 'API') {
 // P1-02 & Ordem 039: Retorna null em falha de rede/API com parsing seguro de HTTP/JSON sem throws de Unexpected end of JSON
 async function fetchTickets(deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
+  const now = typeof deps.now === "function" ? deps.now() : (deps.now || Date.now());
+
+  // 1. Ordem 041: Se o backoff estiver ativo (devido a 403/429 ou cota esgotada), suspende imediatamente
+  if (isRateLimitBackoffActive(now)) {
+    const remainingWaitMs = rateLimitState.backoffUntilMs - now;
+    console.warn("[WATCHDOG BACKOFF] Polling suspenso. Backoff ativo por mais " + Math.round(remainingWaitMs / 1000) + "s devido a limite de taxa ou HTTP 403/429 prévio.");
+    return null;
+  }
+
+  // 2. Ordem 041: Fail-Closed se nenhuma credencial de serviço estiver configurada.
+  // Impede que requisições não autenticadas ocorram em loop e esgotem a cota pública de IP do host.
+  const token = resolveServiceWorkerToken(deps);
+  if (!token) {
+    console.warn("[WATCHDOG AUTH FAIL_CLOSED] Nenhuma credencial de serviço configurada (SERVICE_WORKER_GITHUB_TOKEN / GITHUB_TOKEN). Polling cancelado para proteger cotas do host.");
+    return null;
+  }
+
   let hasError = false;
 
-  // 1. Consulta Contents API no GitHub com parsing seguro e logs de auditoria
+  // 3. Consulta Contents API no GitHub com parsing seguro e logs de auditoria
   try {
     const headers = await getGitHubHeaders(deps);
-    const res = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
-    
+    const res = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: "no-store" });
+
+    if (res) {
+      updateRateLimitFromResponse(res, now);
+    }
+
     if (res && res.status === 404) {
       return []; // Base legítima ainda não criada
+    }
+
+    if (res && (res.status === 403 || res.status === 429)) {
+      console.warn("[WATCHDOG RATE_LIMIT] GitHub Contents API rejeitou requisição com HTTP " + res.status + ". Fallback raw cancelado por política de rate limit.");
+      return null;
     }
 
     if (res && res.ok) {
@@ -407,7 +569,8 @@ async function fetchTickets(deps = {}) {
     hasError = true;
   }
 
-  // 2. Fallback resiliente para raw.githubusercontent.com
+  // 4. Fallback resiliente para raw.githubusercontent.com SOMENTE se não for erro de rate limit
+  if (hasError && !isRateLimitBackoffActive(now)) {
   try {
     const res = await fetchFn(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, { cache: 'no-store' });
     if (res && res.status === 404) {
@@ -427,6 +590,7 @@ async function fetchTickets(deps = {}) {
     console.warn('[WATCHDOG SAFE_HTTP] Exceção no fallback raw:', e.message);
     hasError = true;
   }
+  }
 
   if (hasError) {
     console.warn('[WATCHDOG ALERT] Falha ao consultar banco remoto. Retornando null para preservar dados locais e evitar sobrescrita.');
@@ -438,10 +602,10 @@ async function fetchTickets(deps = {}) {
 // P0-02 & P0-04: Reconciliação em nível de operação com CAS e retries sem perda de dados
 async function saveTickets(tickets, maxRetries = 3, deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
-  const token = (deps.githubToken || GITHUB_TOKEN || '').trim();
+  const token = resolveServiceWorkerToken(deps);
 
   if (!token) {
-    console.warn('[WATCHDOG SECURITY] GITHUB_TOKEN não configurado no ambiente. Salvamento remoto no GitHub Cloud suspenso.');
+    console.warn('[WATCHDOG SECURITY] Credencial de serviço não configurada. Salvamento remoto no GitHub Cloud suspenso.');
     return false;
   }
 
@@ -513,7 +677,7 @@ async function saveTickets(tickets, maxRetries = 3, deps = {}) {
 // P0-A: Verificador estrito de procedência de commit no GitHub (Fail-closed; sem fallback por string)
 async function verifyCommit(tenant, commitSha, deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
-  const token = (deps.githubToken || GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
+  const token = resolveServiceWorkerToken(deps);
 
   if (!commitSha || typeof commitSha !== 'string' || !/^[0-9a-f]{7,40}$/i.test(commitSha)) {
     return { valid: false, reason: 'invalid_sha_format' };
@@ -1214,31 +1378,50 @@ async function runWatchdog() {
 }
 
 async function runContinuousWorker(options = {}) {
-  const pollIntervalMs = options.pollIntervalMs || 5000;
+  const envInterval = parseInt(process.env.WATCHER_POLL_INTERVAL_MS, 10);
+  const pollIntervalMs = options.pollIntervalMs || (!isNaN(envInterval) && envInterval > 0 ? envInterval : 15000);
   let isRunning = true;
 
-  console.log('=======================================================');
-  console.log('    HelpUS Unified Ticket Worker (Node.js Service)     ');
-  console.log('=======================================================');
-  console.log(`[WORKER] Iniciado com sucesso. Polling a cada ${pollIntervalMs / 1000}s.`);
-  console.log('[WORKER] Identidade: service_worker (Privilégios Mínimos / Zero Telemetria Falsa)');
+  console.log("=======================================================");
+  console.log("    HelpUS Unified Ticket Worker (Node.js Service)     ");
+  console.log("=======================================================");
+  console.log("[WORKER] Iniciado com sucesso. Polling configurado para " + (pollIntervalMs / 1000) + "s.");
+  console.log("[WORKER] Identidade: service_worker (Privilégios Mínimos / Zero Telemetria Falsa)");
+
+  const tokenMeta = inspectTokenMetadata(resolveServiceWorkerToken(options.deps));
+  if (!tokenMeta.configured) {
+    console.warn("[WORKER AUTH WARN] Nenhuma credencial de serviço configurada (SERVICE_WORKER_GITHUB_TOKEN / GITHUB_TOKEN). Worker iniciará em modo FAIL-CLOSED aguardando credencial.");
+  } else {
+    console.log("[WORKER AUTH] Credencial de serviço detectada: " + tokenMeta.kind + " (tamanho: " + tokenMeta.length + ").");
+  }
 
   const cleanup = () => {
-    console.log('\n[WORKER] Sinal de encerramento recebido. Finalizando com segurança...');
+    console.log("\n[WORKER] Sinal de encerramento recebido. Finalizando com segurança...");
     isRunning = false;
-    process.exit(0);
+    if (!options.noExit) process.exit(0);
   };
 
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+  process.on("SIGINT", cleanup);
+  process.on("SIGTERM", cleanup);
 
   while (isRunning) {
+    const cycleStart = Date.now();
     try {
+      if (isRateLimitBackoffActive(cycleStart)) {
+        const waitMs = rateLimitState.backoffUntilMs - cycleStart;
+        console.warn("[WORKER] Ciclo pausado por rate limit backoff. Aguardando " + Math.round(waitMs / 1000) + "s...");
+        await new Promise((resolve) => setTimeout(resolve, Math.min(waitMs, 60000)));
+        continue;
+      }
+
       await runWatchdogCycle({ ...options, allowAutonomousDeploy: false });
     } catch (err) {
-      console.error('[WORKER ERROR Ciclo]:', err.message);
+      console.error("[WORKER ERROR Ciclo]:", err.message);
     }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+    const elapsed = Date.now() - cycleStart;
+    const sleepMs = Math.max(pollIntervalMs - elapsed, 2000);
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
 }
 
@@ -1271,6 +1454,12 @@ module.exports = {
   getClaim,
   safeParseHttpResponse,
   safeSanitizeUrl,
+  resolveServiceWorkerToken,
+  inspectTokenMetadata,
+  getRateLimitState,
+  resetRateLimitState,
+  isRateLimitBackoffActive,
+  updateRateLimitFromResponse,
 };
 
 if (require.main === module) {

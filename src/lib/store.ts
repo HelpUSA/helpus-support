@@ -446,7 +446,7 @@ for (const t of INITIAL_TICKETS) {
 }
 
 function getGitHubToken(): string {
-  return (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
+  return (process.env.SERVICE_WORKER_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
 }
 function getDbRepo(): string {
   return process.env.HELPUS_DB_REPO || process.env.GITHUB_DB_REPO || 'HelpUSA/publicarte';

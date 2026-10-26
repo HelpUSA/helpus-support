@@ -67,4 +67,6 @@ export interface Ticket {
   adminNotes?: string;
   progressPercentage?: number; // 0 to 100
   progressStep?: string; // Current step description
+  reopenedAt?: string;
+  solutionCommitSha?: string;
 }

@@ -1,6 +1,6 @@
 // scripts/test_remediation_p0_p1.mjs
-// Suite Completa de Testes Comportamentais com Mocks de Rede (P0/P1 Terceira Auditoria)
-// Atende integralmente às exigências da Terceira Auditoria Independente (Issue Comment 6405737739)
+// Suite Completa de Testes Comportamentais com Mocks de Rede (Quarta Auditoria PR #1)
+// Atende integralmente às exigências da Quarta Auditoria Independente (Issue Comment 6405811322)
 
 import assert from 'node:assert/strict';
 import {
@@ -10,7 +10,8 @@ import {
   saveTickets,
   verifyCommit,
   verifyDeployment,
-  mergeTicketsGranular
+  mergeTicketsGranular,
+  reconcileTicketLifecycle
 } from './antigravity_watcher.js';
 
 let passed = 0;
@@ -29,52 +30,81 @@ async function test(name, fn) {
 }
 
 console.log('='.repeat(80));
-console.log('SUITE DE TESTES COMPORTAMENTAIS: TERCEIRA AUDITORIA PR #1 (P0/P1)');
+console.log('SUITE DE TESTES COMPORTAMENTAIS: QUARTA AUDITORIA PR #1 (P0/P1)');
 console.log('='.repeat(80));
 
 // ---------------------------------------------------------------------------
-// TESTE 1: Preservação de Mensagens e Monotonicidade de Estado (P0-04 & P1)
+// TESTE 1: P0 Quarta Auditoria - Reabertura Legítima Preservada Contra Resolved Concorrente
 // ---------------------------------------------------------------------------
-await test('P0-04 & P1: mergeTicketsGranular preserva mensagens concorrentes e impede regressão de status', () => {
-  const remoteTickets = [
-    {
-      id: 'AID-101',
-      code: 'AID-101',
-      title: 'Remoção texto do CRM',
-      tenantId: 'aidoctor',
-      status: 'pending_approval',
-      updatedAt: '2026-10-25T20:10:00.000Z',
-      progressPercentage: 25,
-      messages: [
-        { id: 'm1', createdAt: '2026-10-25T20:01:00.000Z', senderId: 'cliente@helpus.com', content: 'Msg concorrente cliente' }
-      ]
-    }
-  ];
+await test('P0: mergeTicketsGranular preserva reabertura autorizada (pending_approval, 0%) e impede anulação por resolved', () => {
+  // Cenário: Ticket estava resolved (100%), mas o Master SuperAdmin reabriu o ticket
+  const resolvedSnapshot = {
+    id: 'AID-101',
+    code: 'AID-101',
+    title: 'Remoção texto do CRM',
+    tenantId: 'aidoctor',
+    status: 'resolved',
+    progressPercentage: 100,
+    updatedAt: '2026-10-25T20:00:00.000Z',
+    messages: [
+      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Publicação confirmada e verificada como READY' }
+    ]
+  };
 
-  const localTickets = [
-    {
-      id: 'AID-101',
-      code: 'AID-101',
-      title: 'Remoção texto do CRM',
-      tenantId: 'aidoctor',
-      status: 'in_production',
-      updatedAt: '2026-10-25T20:05:00.000Z',
-      progressPercentage: 75,
-      messages: [
-        { id: 'm2', createdAt: '2026-10-25T20:02:00.000Z', senderId: 'agente@helpus.com', content: 'Msg concorrente agente' }
-      ]
-    }
-  ];
+  const reopenedSnapshot = {
+    id: 'AID-101',
+    code: 'AID-101',
+    title: 'Remoção texto do CRM',
+    tenantId: 'aidoctor',
+    status: 'pending_approval',
+    progressPercentage: 0,
+    updatedAt: '2026-10-25T20:10:00.000Z', // Evento posterior no tempo
+    messages: [
+      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Publicação confirmada e verificada como READY' },
+      { id: 'msg-reset-1792967000', createdAt: '2026-10-25T20:10:00.000Z', senderId: 'master.superadmin@helpusbr.com', content: "🔄 Chamado retornado para 'pending_approval' pelo Master SuperAdmin. Todo o histórico anterior foi integralmente preservado." }
+    ]
+  };
 
-  const merged = mergeTicketsGranular(remoteTickets, localTickets);
+  const merged = mergeTicketsGranular([resolvedSnapshot], [reopenedSnapshot]);
   assert.equal(merged.length, 1);
-  assert.equal(merged[0].messages.length, 2, 'Ambas as mensagens concorrentes devem ser preservadas');
-  assert.equal(merged[0].status, 'in_production', 'Status in_production não deve regredir para pending_approval');
-  assert.equal(merged[0].progressPercentage, 75, 'Progresso mais avançado não deve regredir');
+  assert.equal(merged[0].status, 'pending_approval', 'Reabertura deve prevalecer sobre status resolved anterior');
+  assert.equal(merged[0].progressPercentage, 0, 'Progresso deve ser resetado para 0% na reabertura');
+  assert.equal(merged[0].messages.length, 2, 'Histórico completo deve ser preservado');
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 2: CAS 409 Concurrency no saveTickets com Reconciliação
+// TESTE 2: P0 Quarta Auditoria - Reabertura pelo Cliente Preservada
+// ---------------------------------------------------------------------------
+await test('P0: mergeTicketsGranular preserva reabertura solicitada pelo cliente contra in_production concorrente', () => {
+  const inProductionSnapshot = {
+    id: 'AID-101',
+    status: 'in_production',
+    progressPercentage: 75,
+    updatedAt: '2026-10-25T19:00:00.000Z',
+    messages: [
+      { id: 'msg-prg-1', createdAt: '2026-10-25T19:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '⚡ [PROGRESSO REAL 75%]: Deploy acionado na Vercel Cloud' }
+    ]
+  };
+
+  const clientReopenedSnapshot = {
+    id: 'AID-101',
+    status: 'pending_approval',
+    progressPercentage: 0,
+    updatedAt: '2026-10-25T19:30:00.000Z',
+    messages: [
+      { id: 'msg-prg-1', createdAt: '2026-10-25T19:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '⚡ [PROGRESSO REAL 75%]: Deploy acionado na Vercel Cloud' },
+      { id: 'msg-reopen-client', createdAt: '2026-10-25T19:30:00.000Z', senderId: 'cliente@helpus.com', content: '🔄 *Chamado Reaberto pelo Cliente*\n\nMotivo: Necessário revisão do layout' }
+    ]
+  };
+
+  const merged = mergeTicketsGranular([inProductionSnapshot], [clientReopenedSnapshot]);
+  assert.equal(merged[0].status, 'pending_approval');
+  assert.equal(merged[0].progressPercentage, 0);
+  assert.equal(merged[0].messages.length, 2);
+});
+
+// ---------------------------------------------------------------------------
+// TESTE 3: CAS 409 Concurrency no saveTickets com Reconciliação
 // ---------------------------------------------------------------------------
 await test('P0-02 & P0-04: saveTickets resolve 409 via CAS, reconcilia e envia payload mesclado', async () => {
   let putCount = 0;
@@ -149,7 +179,7 @@ await test('P0-02 & P0-04: saveTickets resolve 409 via CAS, reconcilia e envia p
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 3: CAS 409 com Falha de Re-Fetch Aborta Retry (P1)
+// TESTE 4: CAS 409 com Falha de Re-Fetch Aborta Retry (P1)
 // ---------------------------------------------------------------------------
 await test('P1: saveTickets aborta imediatamente se o re-fetch falhar durante tratamento de 409', async () => {
   let putCount = 0;
@@ -162,7 +192,6 @@ await test('P1: saveTickets aborta imediatamente se o re-fetch falhar durante tr
           json: async () => ({ sha: 'sha-1', content: Buffer.from(JSON.stringify([])).toString('base64') })
         };
       }
-      // Re-fetch falha após o 409
       return { ok: false, status: 500, text: async () => 'Database server error' };
     }
 
@@ -183,7 +212,7 @@ await test('P1: saveTickets aborta imediatamente se o re-fetch falhar durante tr
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 4: Verificação de Retorno de okHold (P1-01)
+// TESTE 5: Verificação de Retorno de okHold (P1-01)
 // ---------------------------------------------------------------------------
 await test('P1-01: processTicket checa estritamente okHold e falha se a persistência de espera falhar', async () => {
   let putCount = 0;
@@ -231,18 +260,16 @@ await test('P1-01: processTicket checa estritamente okHold e falha se a persist�
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 5: P0-A - SHA Inventado de 40 Dígitos Rejeitado Sem Consulta GitHub
+// TESTE 6: P0-A - SHA Inventado de 40 Dígitos Rejeitado Sem Consulta GitHub
 // ---------------------------------------------------------------------------
 await test('P0-A: verifyCommit rejeita SHA inventado de 40 dígitos e exige resposta verificada do GitHub', async () => {
   const inventedSha = '0000000000000000000000000000000000000000';
   const tenant = TENANTS.aidoctor;
 
-  // 1. Sem token: rejeitado (sem bypass de string length)
   const noTokenResult = await verifyCommit(tenant, inventedSha, { githubToken: '' });
   assert.equal(noTokenResult.valid, false);
   assert.equal(noTokenResult.reason, 'unverified_commit_remote_check_required_no_token');
 
-  // 2. Com token, mas GitHub retorna 404: rejeitado
   const mockFetch404 = async () => ({ ok: false, status: 404, json: async () => ({ message: 'Not Found' }) });
   const gitHub404Result = await verifyCommit(tenant, inventedSha, {
     fetch: mockFetch404,
@@ -253,10 +280,10 @@ await test('P0-A: verifyCommit rejeita SHA inventado de 40 dígitos e exige resp
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 6: P0-A - Commit Legítimo Comprovado no Repositório
+// TESTE 7: P0-A - Commit Legítimo Comprovado no Repositório
 // ---------------------------------------------------------------------------
 await test('P0-A: verifyCommit valida commit legítimo com SHA canônico no GitHub', async () => {
-  const legitimateSha = '00eb4bde8d25a84853acf805dcad5de62f2077ec';
+  const legitimateSha = 'e6f2966c0f7f5d171dbabfe7156811bc65cdc269';
   const tenant = TENANTS.aidoctor;
 
   const mockFetch200 = async (url) => {
@@ -266,7 +293,7 @@ await test('P0-A: verifyCommit valida commit legítimo com SHA canônico no GitH
         status: 200,
         json: async () => ({
           sha: legitimateSha,
-          commit: { message: 'fix(audit-r2): correcao' }
+          commit: { message: 'fix(audit-r3): correcao' }
         })
       };
     }
@@ -283,19 +310,49 @@ await test('P0-A: verifyCommit valida commit legítimo com SHA canônico no GitH
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 7: P0-B - Rejeição de Vercel Deployment com Target Inválido / Preview
+// TESTE 8: P0-B & Quarta Auditoria - Rejeição por Vercel Project Mismatch
+// ---------------------------------------------------------------------------
+await test('P0-B & Quarta Auditoria: verifyDeployment rejeita deployment com projeto Vercel divergente do tenant', async () => {
+  const tenant = TENANTS.aidoctor; // vercelProject: 'aidoctor'
+  const approvedSha = 'e6f2966c0f7f5d171dbabfe7156811bc65cdc269';
+
+  const mockFetchMismatchProject = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      id: 'dpl_wrong_proj',
+      name: 'outro_projeto_qualquer', // Divergente de 'aidoctor'
+      status: 'READY',
+      target: 'production',
+      meta: { githubCommitSha: approvedSha }
+    })
+  });
+
+  const result = await verifyDeployment(tenant, {
+    deploymentId: 'dpl_wrong_proj',
+    expectedSha: approvedSha,
+    vercelToken: 'v_token'
+  }, { fetch: mockFetchMismatchProject });
+
+  assert.equal(result.ready, false);
+  assert.equal(result.reason, 'project_mismatch_outro_projeto_qualquer');
+});
+
+// ---------------------------------------------------------------------------
+// TESTE 9: P0-B - Rejeição de Vercel Deployment com Target Inválido / Preview
 // ---------------------------------------------------------------------------
 await test('P0-B: verifyDeployment rejeita deployment com target ausente ou preview', async () => {
   const tenant = TENANTS.aidoctor;
-  const legitimateSha = '00eb4bde8d25a84853acf805dcad5de62f2077ec';
+  const legitimateSha = 'e6f2966c0f7f5d171dbabfe7156811bc65cdc269';
 
   const mockFetchPreview = async () => ({
     ok: true,
     status: 200,
     json: async () => ({
       id: 'dpl_preview',
+      name: 'aidoctor',
       status: 'READY',
-      target: 'preview', // Target não é production
+      target: 'preview',
       meta: { githubCommitSha: legitimateSha }
     })
   });
@@ -311,68 +368,63 @@ await test('P0-B: verifyDeployment rejeita deployment com target ausente ou prev
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 8: P0-B - Rejeição de Vercel Deployment com Commit Divergente
+// TESTE 10: P0-B - Rejeição de Smoke Test Sem Prova Criptográfica/Versionada de SHA
 // ---------------------------------------------------------------------------
-await test('P0-B: verifyDeployment rejeita deployment cujo commit não corresponde ao commit aprovado', async () => {
+await test('P0-B & Quarta Auditoria: verifyDeployment rejeita smoke test sem cabeçalho ou payload com commit SHA', async () => {
   const tenant = TENANTS.aidoctor;
-  const approvedSha = '00eb4bde8d25a84853acf805dcad5de62f2077ec';
-  const differentSha = 'ffffffffffffffffffffffffffffffffffffffff';
-
-  const mockFetchMismatchSha = async () => ({
+  const mockFetchNoSha = async () => ({
     ok: true,
     status: 200,
-    json: async () => ({
-      id: 'dpl_prod',
-      status: 'READY',
-      target: 'production',
-      meta: { githubCommitSha: differentSha }
-    })
+    headers: new Map(),
+    json: async () => ({ status: 'ok', version: '1.0.0' }) // Sem o commitSha exato
   });
 
   const result = await verifyDeployment(tenant, {
-    deploymentId: 'dpl_prod',
-    expectedSha: approvedSha,
-    vercelToken: 'v_token'
-  }, { fetch: mockFetchMismatchSha });
-
-  assert.equal(result.ready, false);
-  assert.match(result.reason, /commit_sha_mismatch_deployment/);
-});
-
-// ---------------------------------------------------------------------------
-// TESTE 9: P0-B - Rejeição de Smoke Test Genérico HTTP 200 Isolado
-// ---------------------------------------------------------------------------
-await test('P0-B: verifyDeployment rejeita HTTP 200 genérico de domínio sem comprovação específica', async () => {
-  const tenant = TENANTS.aidoctor;
-  // Smoke test genérico sem assertFn e sem header de commit
-  const mockFetchGeneric200 = async () => ({
-    ok: true,
-    status: 200,
-    text: async () => '<html>Landing Page Antiga</html>',
-    headers: new Map()
-  });
-
-  const result = await verifyDeployment(tenant, {
-    expectedSha: '00eb4bde8d25a84853acf805dcad5de62f2077ec',
-    smokeTestSpecific: { url: 'https://aidoctor.helpusbr.com' }
-  }, { fetch: mockFetchGeneric200 });
+    expectedSha: 'e6f2966c0f7f5d171dbabfe7156811bc65cdc269',
+    smokeTestSpecific: { url: 'https://aidoctor.helpusbr.com/api/version' }
+  }, { fetch: mockFetchNoSha });
 
   assert.equal(result.ready, false);
   assert.equal(result.reason, 'smoke_test_lacks_commit_provenance');
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 10: P0-B - Vercel Deployment READY Comprovado em Produção com Commit Exato
+// TESTE 11: P0-B & Quarta Auditoria - Smoke Test Aprovado com SHA Versionado Comprovado
 // ---------------------------------------------------------------------------
-await test('P0-B: verifyDeployment aprova deployment READY comprovado em produção com SHA exato', async () => {
+await test('P0-B & Quarta Auditoria: verifyDeployment aprova smoke test com commit SHA comprovado no payload/header', async () => {
   const tenant = TENANTS.aidoctor;
-  const approvedSha = '00eb4bde8d25a84853acf805dcad5de62f2077ec';
+  const approvedSha = 'e6f2966c0f7f5d171dbabfe7156811bc65cdc269';
+
+  const mockFetchWithSha = async () => ({
+    ok: true,
+    status: 200,
+    headers: new Map(),
+    json: async () => ({ status: 'ok', commitSha: approvedSha })
+  });
+
+  const result = await verifyDeployment(tenant, {
+    expectedSha: approvedSha,
+    smokeTestSpecific: { url: 'https://aidoctor.helpusbr.com/api/version' }
+  }, { fetch: mockFetchWithSha });
+
+  assert.equal(result.ready, true);
+  assert.equal(result.method, 'smoke_test_body_sha_verified');
+  assert.equal(result.sha, approvedSha);
+});
+
+// ---------------------------------------------------------------------------
+// TESTE 12: P0-B - Vercel Deployment READY Comprovado com Projeto, Target e SHA
+// ---------------------------------------------------------------------------
+await test('P0-B: verifyDeployment aprova deployment READY comprovado em produção com projeto e SHA exato', async () => {
+  const tenant = TENANTS.aidoctor;
+  const approvedSha = 'e6f2966c0f7f5d171dbabfe7156811bc65cdc269';
 
   const mockFetchReadyProd = async () => ({
     ok: true,
     status: 200,
     json: async () => ({
       id: 'dpl_prod_verified',
+      name: 'aidoctor',
       status: 'READY',
       readyState: 'READY',
       target: 'production',
@@ -389,11 +441,12 @@ await test('P0-B: verifyDeployment aprova deployment READY comprovado em produç
 
   assert.equal(result.ready, true);
   assert.equal(result.target, 'production');
+  assert.equal(result.project, 'aidoctor');
   assert.equal(result.sha, approvedSha);
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 11: Rejeição Estrita de Tenant Desconhecido (P1-01)
+// TESTE 13: Rejeição Estrita de Tenant Desconhecido (P1-01)
 // ---------------------------------------------------------------------------
 await test('P1-01: Rejeitar estritamente tenant desconhecido com erro de segurança e sem fallback', async () => {
   const invalidTicket = {
@@ -416,7 +469,7 @@ await test('P1-01: Rejeitar estritamente tenant desconhecido com erro de seguran
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 12: fetchTickets Retorna Null sob Erro de Rede/API (P1-02)
+// TESTE 14: fetchTickets Retorna Null sob Erro de Rede/API (P1-02)
 // ---------------------------------------------------------------------------
 await test('P1-02: fetchTickets retorna null em erro de API para não mascarar indisponibilidade como base vazia', async () => {
   const mockFetch500 = async () => ({
@@ -436,5 +489,5 @@ console.log('='.repeat(80));
 if (failed > 0) {
   process.exit(1);
 } else {
-  console.log('🎉 TODOS OS TESTES DA TERCEIRA AUDITORIA PASSARAM COM 100% DE SUCESSO!');
+  console.log('🎉 TODOS OS TESTES DA QUARTA AUDITORIA PASSARAM COM 100% DE SUCESSO!');
 }

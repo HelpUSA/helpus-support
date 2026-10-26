@@ -12,45 +12,115 @@ const TENANTS = {
     name: 'Brayyan — Revisão Sistemática com IA',
     repo: 'HelpUSA/brayyan',
     domain: 'brayyan.helpusbr.com',
+    vercelProject: 'brayyan',
     deployHook: process.env.VERCEL_DEPLOY_HOOK_BRAYYAN || null
   },
   publicarte: {
     name: 'Public Arte',
     repo: 'HelpUSA/publicarte',
     domain: 'publicarte.helpusbr.com',
+    vercelProject: 'publicarte',
     deployHook: process.env.VERCEL_DEPLOY_HOOK_PUBLICARTE || null
   },
   usmle: {
     name: 'USMLE Platform',
     repo: 'HelpUSA/usmle',
     domain: 'usmle.helpusbr.com',
+    vercelProject: 'usmle',
     deployHook: process.env.VERCEL_DEPLOY_HOOK_USMLE || null
   },
   studionaldohair: {
     name: 'Studio Naldo Hair',
     repo: 'HelpUSA/studionaldohair',
     domain: 'studionaldohair.helpusbr.com',
+    vercelProject: 'studionaldohair',
     deployHook: process.env.VERCEL_DEPLOY_HOOK_STUDIONALDOHAIR || null
   },
   aidoctor: {
     name: 'AIDoctor — Inteligência Artificial Clínica',
     repo: 'HelpUSA/aidoctor',
     domain: 'aidoctor.helpusbr.com',
+    vercelProject: 'aidoctor',
     deployHook: process.env.VERCEL_DEPLOY_HOOK_AIDOCTOR || null
   }
 };
 
 let cloudSha = null;
 
-const STATUS_RANK = {
-  open: 10,
-  pending_approval: 20,
-  in_production: 30,
-  resolved: 40,
-  closed: 50,
-};
+// Reconciliação causal de ciclo de vida e estado (P0 Quarta Auditoria)
+function reconcileTicketLifecycle(localT, remoteT, mergedMessages) {
+  // 1. Inspecionar o histórico cronológico de trás para frente para encontrar o evento de transição causal mais recente
+  for (let i = mergedMessages.length - 1; i >= 0; i--) {
+    const msg = mergedMessages[i];
+    const content = msg.content || '';
+    const msgId = msg.id || '';
 
-// Reconciliação granular de tickets para concorrência CAS sem perda de mensagens e sem regressão de status (P0-04 / P1)
+    // Reabertura explícita autorizada pelo Master SuperAdmin ou solicitada pelo Cliente
+    if (
+      msgId.startsWith('msg-reset-') ||
+      content.includes("retornado para 'pending_approval'") ||
+      content.includes('Chamado Reaberto') ||
+      content.includes('Aguardando Nova Aprovação Master')
+    ) {
+      return {
+        status: 'pending_approval',
+        progressPercentage: 0,
+        reopenedAt: msg.createdAt,
+      };
+    }
+
+    // Resolução / Conclusão
+    if (content.includes('CONCLUÍDO & RESOLVIDO') || content.includes('Publicação confirmada e verificada')) {
+      return {
+        status: 'resolved',
+        progressPercentage: 100,
+      };
+    }
+
+    // Etapas de produção
+    if (content.includes('PROGRESSO REAL 75%') || content.includes('Deploy acionado na Vercel')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 75,
+      };
+    }
+
+    if (content.includes('PROGRESSO REAL 50%') || content.includes('Alteração técnica comprovada')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 50,
+      };
+    }
+
+    if (content.includes('PROGRESSO REAL 25%') || content.includes('Requisitos validados')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 25,
+      };
+    }
+
+    // Aprovação inicial
+    if (content.includes('Aprovação Concedida') || content.includes('Autorizando envio para produção')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 0,
+      };
+    }
+  }
+
+  // 2. Fallback causal caso nenhuma mensagem de transição explícita seja identificada: versão mais recente por updatedAt
+  const localUpdated = localT.updatedAt || '';
+  const remoteUpdated = remoteT.updatedAt || '';
+  const newest = localUpdated >= remoteUpdated ? localT : remoteT;
+
+  return {
+    status: newest.status,
+    progressPercentage: newest.progressPercentage || 0,
+    reopenedAt: newest.reopenedAt,
+  };
+}
+
+// Reconciliação granular de tickets com máquina de estados causal (P0 Quarta Auditoria)
 function mergeTicketsGranular(remoteTickets, localTickets) {
   const map = new Map();
 
@@ -77,27 +147,17 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
         (a.createdAt || '').localeCompare(b.createdAt || '')
       );
 
-      // P1: Monotonicidade do ciclo de vida: status aprovado/produção não regride
-      const localRank = STATUS_RANK[localT.status] || 0;
-      const remoteRank = STATUS_RANK[remoteT.status] || 0;
-      let finalStatus = localT.status;
-      if (remoteRank > localRank) {
-        finalStatus = remoteT.status;
-      } else if (localRank > remoteRank) {
-        finalStatus = localT.status;
-      } else {
-        finalStatus = (localT.updatedAt || '') >= (remoteT.updatedAt || '') ? localT.status : remoteT.status;
-      }
-
-      const finalProgress = Math.max(localT.progressPercentage || 0, remoteT.progressPercentage || 0);
+      // P0 Quarta Auditoria: Reconciliação causal de eventos para preservar reaberturas legítimas
+      const lifecycle = reconcileTicketLifecycle(localT, remoteT, mergedMessages);
       const localUpdated = localT.updatedAt || '';
       const remoteUpdated = remoteT.updatedAt || '';
       const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
 
       map.set(localT.id, {
         ...baseTicket,
-        status: finalStatus,
-        progressPercentage: finalProgress,
+        status: lifecycle.status,
+        progressPercentage: lifecycle.progressPercentage,
+        reopenedAt: lifecycle.reopenedAt || baseTicket.reopenedAt,
         messages: mergedMessages,
       });
     }
@@ -297,7 +357,7 @@ async function verifyDeployment(tenant, options = {}, deps = {}) {
     return { ready: false, reason: 'missing_expected_commit_sha' };
   }
 
-  // 1. Verificação via Vercel Deployments API com comprovação estrita
+  // 1. Verificação via Vercel Deployments API com comprovação estrita de Projeto, Target e SHA
   if (options.deploymentId && (options.vercelToken || process.env.VERCEL_TOKEN)) {
     const vToken = (options.vercelToken || process.env.VERCEL_TOKEN).trim();
     try {
@@ -319,13 +379,23 @@ async function verifyDeployment(tenant, options = {}, deps = {}) {
           return { ready: false, reason: `invalid_target_${d.target || 'missing'}` };
         }
 
+        // Quarta Auditoria (Hardening): Correlacionar projeto Vercel e tenant
+        const expectedProject = options.expectedProject || tenant.vercelProject;
+        if (expectedProject) {
+          const nameMatches = d.name && d.name === expectedProject;
+          const idMatches = d.projectId && d.projectId === expectedProject;
+          if (!nameMatches && !idMatches) {
+            return { ready: false, reason: 'project_mismatch_' + (d.name || d.projectId || 'unknown') };
+          }
+        }
+
         // P0-B: Commit SHA do deployment deve corresponder estritamente ao commit aprovado
         const deploySha = d.meta?.githubCommitSha || d.meta?.commitSha;
         if (!deploySha || !deploySha.toLowerCase().startsWith(expectedSha.toLowerCase())) {
           return { ready: false, reason: `commit_sha_mismatch_deployment_${deploySha || 'missing'}` };
         }
 
-        return { ready: true, deploymentId: d.id, url: d.url, target: d.target, sha: deploySha };
+        return { ready: true, deploymentId: d.id, url: d.url, target: d.target, sha: deploySha, project: d.name || d.projectId };
       }
       return { ready: false, reason: `vercel_api_error_${res.status}` };
     } catch (e) {
@@ -333,24 +403,27 @@ async function verifyDeployment(tenant, options = {}, deps = {}) {
     }
   }
 
-  // 2. Verificação via Smoke Test Funcional Específico (P0-B: rejeita HTTP 200 genérico)
+  // 2. Verificação via Smoke Test Funcional Específico com Prova Criptográfica/Versionada de SHA
   if (options.smokeTestSpecific) {
     try {
       const targetUrl = options.smokeTestSpecific.url || `https://${tenant.domain}/api/version`;
       const res = await fetchFn(targetUrl, { method: 'GET', cache: 'no-store' });
       if (res.ok) {
-        if (typeof options.smokeTestSpecific.assertFn === 'function') {
-          const body = await res.text();
-          const passed = options.smokeTestSpecific.assertFn(res, body);
-          if (passed) {
-            return { ready: true, method: 'smoke_test_specific_verified', status: res.status };
-          }
-          return { ready: false, reason: 'smoke_test_assertion_failed' };
-        }
+        // Quarta Auditoria: Rejeitar assertFn arbitrária sem comprovação de versão/commit
         const serverSha = res.headers?.get?.('x-commit-sha') || res.headers?.get?.('x-version');
         if (serverSha && serverSha.toLowerCase().startsWith(expectedSha.toLowerCase())) {
-          return { ready: true, method: 'smoke_test_commit_header_verified', status: res.status };
+          return { ready: true, method: 'smoke_test_commit_header_verified', status: res.status, sha: serverSha };
         }
+
+        // Verificar se payload JSON contém commitSha correspondente
+        try {
+          const bodyJson = await res.json();
+          const bodySha = bodyJson?.commitSha || bodyJson?.sha || bodyJson?.version;
+          if (bodySha && typeof bodySha === 'string' && bodySha.toLowerCase().startsWith(expectedSha.toLowerCase())) {
+            return { ready: true, method: 'smoke_test_body_sha_verified', status: res.status, sha: bodySha };
+          }
+        } catch (_) {}
+
         return { ready: false, reason: 'smoke_test_lacks_commit_provenance' };
       }
       return { ready: false, reason: `smoke_test_failed_status_${res.status}` };
@@ -543,6 +616,7 @@ async function runWatchdog() {
 
 module.exports = {
   TENANTS,
+  reconcileTicketLifecycle,
   processTicket,
   fetchTickets,
   saveTickets,

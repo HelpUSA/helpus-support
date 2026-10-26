@@ -420,13 +420,82 @@ function githubApiRequest(method: string, path: string, body?: any): Promise<{ s
   });
 }
 
-const STATUS_RANK: Record<string, number> = {
-  open: 10,
-  pending_approval: 20,
-  in_production: 30,
-  resolved: 40,
-  closed: 50,
-};
+// Reconciliação causal de ciclo de vida e estado (P0 Quarta Auditoria)
+export function reconcileTicketLifecycle(
+  localT: Ticket,
+  remoteT: Ticket,
+  mergedMessages: any[]
+): { status: any; progressPercentage: number; reopenedAt?: string } {
+  // 1. Inspecionar o histórico cronológico de trás para frente para encontrar o evento de transição causal mais recente
+  for (let i = mergedMessages.length - 1; i >= 0; i--) {
+    const msg = mergedMessages[i];
+    const content = msg.content || '';
+    const msgId = msg.id || '';
+
+    // Reabertura explícita autorizada pelo Master SuperAdmin ou solicitada pelo Cliente
+    if (
+      msgId.startsWith('msg-reset-') ||
+      content.includes("retornado para 'pending_approval'") ||
+      content.includes('Chamado Reaberto') ||
+      content.includes('Aguardando Nova Aprovação Master')
+    ) {
+      return {
+        status: 'pending_approval',
+        progressPercentage: 0,
+        reopenedAt: msg.createdAt,
+      };
+    }
+
+    // Resolução / Conclusão
+    if (content.includes('CONCLUÍDO & RESOLVIDO') || content.includes('Publicação confirmada e verificada')) {
+      return {
+        status: 'resolved',
+        progressPercentage: 100,
+      };
+    }
+
+    // Etapas de produção
+    if (content.includes('PROGRESSO REAL 75%') || content.includes('Deploy acionado na Vercel')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 75,
+      };
+    }
+
+    if (content.includes('PROGRESSO REAL 50%') || content.includes('Alteração técnica comprovada')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 50,
+      };
+    }
+
+    if (content.includes('PROGRESSO REAL 25%') || content.includes('Requisitos validados')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 25,
+      };
+    }
+
+    // Aprovação inicial
+    if (content.includes('Aprovação Concedida') || content.includes('Autorizando envio para produção')) {
+      return {
+        status: 'in_production',
+        progressPercentage: 0,
+      };
+    }
+  }
+
+  // 2. Fallback causal caso nenhuma mensagem de transição explícita seja identificada: versão mais recente por updatedAt
+  const localUpdated = localT.updatedAt || '';
+  const remoteUpdated = remoteT.updatedAt || '';
+  const newest = localUpdated >= remoteUpdated ? localT : remoteT;
+
+  return {
+    status: newest.status,
+    progressPercentage: newest.progressPercentage || 0,
+    reopenedAt: newest.reopenedAt,
+  };
+}
 
 export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
   const map = new Map<string, Ticket>();
@@ -455,27 +524,17 @@ export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Tick
         (a.createdAt || '').localeCompare(b.createdAt || '')
       );
 
-      // P1: Monotonicidade de estado - status aprovado ou em produção não regride
-      const localRank = STATUS_RANK[localT.status] || 0;
-      const remoteRank = STATUS_RANK[remoteT.status] || 0;
-      let finalStatus = localT.status;
-      if (remoteRank > localRank) {
-        finalStatus = remoteT.status;
-      } else if (localRank > remoteRank) {
-        finalStatus = localT.status;
-      } else {
-        finalStatus = (localT.updatedAt || '') >= (remoteT.updatedAt || '') ? localT.status : remoteT.status;
-      }
-
-      const finalProgress = Math.max(localT.progressPercentage || 0, remoteT.progressPercentage || 0);
+      // P0 Quarta Auditoria: Reconciliação causal de eventos para preservar reaberturas e integridade de status
+      const lifecycle = reconcileTicketLifecycle(localT, remoteT, mergedMessages);
       const localUpdated = localT.updatedAt || '';
       const remoteUpdated = remoteT.updatedAt || '';
       const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
 
       map.set(localT.id, {
         ...baseTicket,
-        status: finalStatus as any,
-        progressPercentage: finalProgress,
+        status: lifecycle.status,
+        progressPercentage: lifecycle.progressPercentage,
+        reopenedAt: lifecycle.reopenedAt || baseTicket.reopenedAt,
         messages: mergedMessages,
       });
     }

@@ -6,7 +6,8 @@
     "dev": "next dev --port 3012",
     "build": "next build",
     "start": "next start --port 3012",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test": "node scripts/test_remediation_p0_p1.mjs && tsx scripts/test_store_behavior.mjs"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.2",
@@ -25,6 +26,7 @@
     "@types/react-dom": "^19.0.0",
     "postcss": "^8.5.0",
     "tailwindcss": "^4.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.7.0"
   }
 }

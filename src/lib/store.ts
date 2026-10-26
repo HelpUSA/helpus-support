@@ -1008,19 +1008,23 @@ export class TicketStore {
     ticket.progressPercentage = 0;
     delete ticket.progressStep;
     ticket.updatedAt = new Date().toISOString();
-    ticket.messages = [
-      {
-        id: "msg-1791048000000",
-        ticketId: ticket.id,
-        senderId: ticket.createdByEmail || "eduardojcmagalhaes@gmail.com",
-        senderName: ticket.createdByName || "Eduardo Magalhães (Neuro)",
-        senderRole: "client",
-        isInternalNote: false,
-        content: ticket.description,
-        attachments: [],
-        createdAt: ticket.createdAt || "2026-10-03T23:01:51.000Z"
-      }
-    ];
+
+    // P1-02: Preservar histórico completo de mensagens em vez de sobrescrever
+    if (!Array.isArray(ticket.messages)) {
+      ticket.messages = [];
+    }
+    ticket.messages.push({
+      id: `msg-reset-${Date.now()}`,
+      ticketId: ticket.id,
+      senderId: "master.superadmin@helpusbr.com",
+      senderName: "Master SuperAdmin (HelpUS)",
+      senderRole: "system",
+      isInternalNote: true,
+      content: "🔄 Chamado retornado para 'pending_approval' pelo Master SuperAdmin. Todo o histórico anterior foi integralmente preservado.",
+      attachments: [],
+      createdAt: new Date().toISOString()
+    });
+
     await this.saveAsync();
     return ticket;
   }

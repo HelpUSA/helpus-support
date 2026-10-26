@@ -1,11 +1,10 @@
 // Ordem 072: verify a GitHub-authenticated sandbox approval and reject wrong
 // HMAC/actor/tenant without writing or dispatching anything (all mocked).
 import assert from 'node:assert/strict';
-import {createHmac} from 'node:crypto';
 import {createRequire} from 'node:module';
 const require=createRequire(import.meta.url);
 const {verifyApprovedSandboxOnce}=require('./staging_signed_approval_probe.js');
-const {computeEventPayload,verifyTicketEventIntegrity}=require('./antigravity_watcher.js');
+const {signTicketEvent,verifyTicketEventIntegrity}=require('./antigravity_watcher.js');
 const {STAGING_ENDPOINT}=require('./sandbox_gh_probe.js');
 const key='0'.repeat(64);
 process.env.EVENT_HMAC_SECRET=key;
@@ -17,7 +16,7 @@ const event={
  note:'Single synthetic approval; no model invocation',timestamp:new Date().toISOString(),
  seq:1,idempotencyKey:'helpus-approval-outbox-v1:'+id+':evt-appr-072'
 };
-event.signature=createHmac('sha256',key).update(computeEventPayload(event)).digest('hex');
+event.signature=signTicketEvent(event);
 const ticket={id,code:id,tenantId:'sandbox',status:'in_production',progressPercentage:0,events:[event]};
 let stored=[ticket], ghCalls=0, quotas=0;
 const runGh=(bin,args)=>{
@@ -60,5 +59,5 @@ result=verifyApprovedSandboxOnce(id,opts);
 assert.equal(result.ok,false);
 stored=[{...ticket,tenantId:'aidoctor'}];
 result=verifyApprovedSandboxOnce(id,opts);
-assert.equal(result.reason,'tenant_not_allowed');
+assert.equal(result.reason,'staging_contains_non_sandbox_data');
 console.log('✅ Ordem 072: verified signed SBX GitHub approval, one read, zero POST/dispatch');

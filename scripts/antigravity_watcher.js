@@ -2096,6 +2096,17 @@ if (require.main === module) {
       console.error('[BRIDGE PROBE] Falha local:',error.message);
       process.exit(1);
     });
+  } else if (args.some(a => a.startsWith('--inspect-staging-sbx='))) {
+    // Ordem 063: uma consulta GitHub CLI exclusivamente GET ao sandbox privado.
+    const ticketId=args.find(a=>a.startsWith('--inspect-staging-sbx=')).slice('--inspect-staging-sbx='.length);
+    const {inspectStagingSandboxTicket}=require('./sandbox_gh_probe.js');
+    const report=inspectStagingSandboxTicket(ticketId,{
+      paused:isWorkerPaused().paused,
+      confirmed:args.includes('--confirmed-readonly'),
+      reserve:(kind)=>reserveExternalRequest(kind),
+    });
+    console.log(JSON.stringify(report,null,2));
+    process.exit(report.ok?0:1);
   } else if (args.some(a => a.startsWith('--dispatch-approved-sbx='))) {
     // Ordem 056: only a signed, remotely persisted SBX Master approval may be queued.
     const id = args.find(a => a.startsWith('--dispatch-approved-sbx=')).slice('--dispatch-approved-sbx='.length);

@@ -2110,23 +2110,18 @@ if (require.main === module) {
   } else if (args.some(a => a.startsWith('--dispatch-approved-sbx='))) {
     // Ordem 056: only a signed, remotely persisted SBX Master approval may be queued.
     const id = args.find(a => a.startsWith('--dispatch-approved-sbx=')).slice('--dispatch-approved-sbx='.length);
-    const { dispatchSandboxApprovedOnDemand } = require('./approval_outbox.js');
-    const { dispatchSandboxTicket } = require('./sandbox_dispatch.js');
-    const { fetchSandboxTicketsFromGitHub } = require('./staging_sbx_reader.js');
-    const paused = isWorkerPaused().paused;
-    const confirmed = args.includes('--send-local');
-    dispatchSandboxApprovedOnDemand(id, {
-      paused, confirmed, allowedTenantIds: ['sandbox'],
-      // Strict staging isolation: never query HelpUSA/publicarte in SBX dispatch.
-      fetchTickets: async () => {
-        const read = await fetchSandboxTicketsFromGitHub({
-          paused,confirmed:true,
-          reserve: (kind) => reserveExternalRequest(kind)
-        });
-        return read.ok ? read.tickets : null;
-      },
-      verifyEvent: verifyTicketEventIntegrity,
-      dispatch: dispatchSandboxTicket,
+    // Ordem 065: only the private sandbox repo, HMAC + operator dual gate,
+    // atomic journal before any local POST, and durable ACK reconciliation.
+    const {oneShotPrivateSandbox}=require('./staging_private_one_shot.js');
+    const paused=isWorkerPaused().paused;
+    oneShotPrivateSandbox(id,{
+      paused,
+      confirmed:args.includes('--send-local'),
+      sendLocal:args.includes('--send-local'),
+      env:process.env,
+      tempDir:require('node:path').join(require('node:os').tmpdir(),'helpus-support-sbx-journal'),
+      verifyEvent:verifyTicketEventIntegrity,
+      reserve:(kind)=>reserveExternalRequest(kind),
     }).then(result => {
       console.log(JSON.stringify(result,null,2));
       process.exit(result.ok?0:1);

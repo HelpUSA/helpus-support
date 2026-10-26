@@ -294,41 +294,137 @@ async function getGitHubHeaders(deps = {}) {
   return headers;
 }
 
-// P1-02: Retorna null em caso de falha de rede/API para não confundir indisponibilidade com base vazia ([])
+// Ordem 039: Sanitização segura de URLs para logs sem vazamento de tokens ou segredos
+function safeSanitizeUrl(urlStr) {
+  if (!urlStr || typeof urlStr !== 'string') return 'internal_url';
+  try {
+    const parsed = new URL(urlStr);
+    return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+  } catch {
+    return 'sanitized_endpoint';
+  }
+}
+
+// Ordem 039: Leitura resiliente de respostas HTTP com logs de auditoria seguros (status, content-type, origem)
+async function safeParseHttpResponse(res, context = 'API') {
+  if (!res) {
+    return { ok: false, error: 'null_response', status: 0, contentType: 'none', origin: 'none' };
+  }
+
+  const status = typeof res.status === 'number' ? res.status : 0;
+  const contentType = (res.headers?.get?.('content-type') || res.headers?.get?.('Content-Type') || 'unknown').toLowerCase();
+  const origin = safeSanitizeUrl(res.url);
+
+  // Compatibilidade com fetch padrão (res.text) e mocks que implementam apenas res.json()
+  if (typeof res.text === 'function') {
+    let text = '';
+    try {
+      text = await res.text();
+    } catch (readErr) {
+      console.warn(`[WATCHDOG SAFE_HTTP] Falha ao extrair payload de ${origin} (status: ${status}, content-type: ${contentType}): ${readErr.message}`);
+      return { ok: false, error: 'body_read_failed', status, contentType, origin };
+    }
+
+    const trimmed = (text || '').trim();
+    if (trimmed.length === 0) {
+      console.warn(`[WATCHDOG SAFE_HTTP] Resposta HTTP vazia recebida de ${origin} (status: ${status}, content-type: ${contentType}, bytes: 0).`);
+      return { ok: false, error: 'empty_response_body', status, contentType, origin, isEmpty: true };
+    }
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      return { ok: true, data: parsed, status, contentType, origin };
+    } catch (parseErr) {
+      console.warn(`[WATCHDOG SAFE_HTTP] JSON malformado de ${origin} (status: ${status}, content-type: ${contentType}, bytes: ${trimmed.length}): ${parseErr.message}`);
+      return { ok: false, error: 'invalid_json', status, contentType, origin, parseError: parseErr.message };
+    }
+  } else if (typeof res.json === 'function') {
+    try {
+      const parsedData = await res.json();
+      return { ok: true, data: parsedData, status, contentType, origin };
+    } catch (jsonErr) {
+      console.warn(`[WATCHDOG SAFE_HTTP] Falha ao interpretar res.json de ${origin} (status: ${status}, content-type: ${contentType}): ${jsonErr.message}`);
+      return { ok: false, error: 'invalid_json', status, contentType, origin, parseError: jsonErr.message };
+    }
+  }
+
+  return { ok: false, error: 'unsupported_response_type', status, contentType, origin };
+}
+// P1-02 & Ordem 039: Retorna null em falha de rede/API com parsing seguro de HTTP/JSON sem throws de Unexpected end of JSON
 async function fetchTickets(deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
   let hasError = false;
 
+  // 1. Consulta Contents API no GitHub com parsing seguro e logs de auditoria
   try {
     const headers = await getGitHubHeaders(deps);
     const res = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
-    if (res.ok) {
-      const data = await res.json();
-      cloudSha = data.sha;
-      const content = Buffer.from(data.content, 'base64').toString('utf-8');
-      return JSON.parse(content);
-    } else if (res.status === 404) {
+    
+    if (res && res.status === 404) {
       return []; // Base legítima ainda não criada
+    }
+
+    if (res && res.ok) {
+      const parsedHttp = await safeParseHttpResponse(res, 'GitHub Contents API');
+      if (parsedHttp.ok && parsedHttp.data) {
+        const data = parsedHttp.data;
+        if (data.sha) {
+          cloudSha = data.sha;
+        }
+        if (typeof data.content === 'string') {
+          const trimmedB64 = data.content.trim();
+          if (trimmedB64.length === 0) {
+            console.warn(`[WATCHDOG SAFE_HTTP] Conteúdo base64 vazio no arquivo ${DB_PATH}.`);
+            return [];
+          }
+          try {
+            const content = Buffer.from(trimmedB64, 'base64').toString('utf-8').trim();
+            if (!content || content.length === 0) {
+              console.warn(`[WATCHDOG SAFE_HTTP] Conteúdo decodificado de ${DB_PATH} vazio.`);
+              return [];
+            }
+            const parsedArray = JSON.parse(content);
+            if (Array.isArray(parsedArray)) {
+              return parsedArray;
+            }
+          } catch (contentErr) {
+            console.warn(`[WATCHDOG SAFE_HTTP] Falha ao decodificar/parsear conteúdo de ${DB_PATH}: ${contentErr.message}`);
+            hasError = true;
+          }
+        } else if (Array.isArray(data)) {
+          return data;
+        }
+      } else {
+        hasError = true;
+      }
     } else {
-      console.error(`[WATCHDOG] GitHub API fetch error status ${res.status}`);
+      const status = res ? res.status : 0;
+      console.warn(`[WATCHDOG SAFE_HTTP] GitHub API contents retornou HTTP ${status}. Tentando fallback raw.`);
       hasError = true;
     }
   } catch (e) {
-    console.error('[WATCHDOG] Fetch API error:', e.message);
+    console.warn('[WATCHDOG SAFE_HTTP] Exceção na Contents API:', e.message);
     hasError = true;
   }
 
+  // 2. Fallback resiliente para raw.githubusercontent.com
   try {
     const res = await fetchFn(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, { cache: 'no-store' });
-    if (res.ok) {
-      return await res.json();
-    } else if (res.status === 404) {
+    if (res && res.status === 404) {
       return [];
+    }
+    if (res && res.ok) {
+      const rawParsed = await safeParseHttpResponse(res, 'GitHub Raw');
+      if (rawParsed.ok && Array.isArray(rawParsed.data)) {
+        return rawParsed.data;
+      } else {
+        hasError = true;
+      }
     } else {
       hasError = true;
     }
   } catch (e) {
-    console.error('[WATCHDOG] Fetch raw error:', e.message);
+    console.warn('[WATCHDOG SAFE_HTTP] Exceção no fallback raw:', e.message);
     hasError = true;
   }
 
@@ -809,28 +905,44 @@ class DurableClaimStore {
 
     const existing = this.claims.get(ticketId);
 
-    // 1. Idempotência / Checagem de claim ativo
+    // 1. Idempotência / Checagem de claim ativo e estados de ciclo de vida (Ordem 039)
     if (existing) {
       const isUnexpired = existing.leaseExpiresAt && new Date(existing.leaseExpiresAt).getTime() > now;
-      if (isUnexpired) {
-        if (existing.status === 'claimed') {
+      if (isUnexpired && existing.status === 'claimed') {
+        return {
+          acquired: false,
+          reason: 'active_claim_held',
+          attemptId: existing.attemptId,
+          fencingToken: existing.fencingToken,
+          leaseExpiresAt: existing.leaseExpiresAt
+        };
+      }
+
+      // Ordem 039: pending_verification / deferred NÃO equivale a completed!
+      if (existing.status === 'deferred') {
+        if (!options.allowAutonomousDeploy) {
           return {
             acquired: false,
-            reason: 'active_claim_held',
+            reason: 'held_pending_governance_verification',
+            status: 'deferred',
             attemptId: existing.attemptId,
             fencingToken: existing.fencingToken,
-            leaseExpiresAt: existing.leaseExpiresAt
-          };
-        }
-        if (existing.status === 'acked' && existing.ticketStatus === currentStatus) {
-          return {
-            acquired: false,
-            reason: 'already_completed',
-            attemptId: existing.attemptId,
-            fencingToken: existing.fencingToken,
+            deferredReason: existing.deferredReason || 'pending_verification',
             result: existing.result
           };
         }
+      }
+
+      // Conclusão comprovada (completed)
+      if (existing.status === 'completed' && existing.ticketStatus === currentStatus) {
+        return {
+          acquired: false,
+          reason: 'already_completed',
+          status: 'completed',
+          attemptId: existing.attemptId,
+          fencingToken: existing.fencingToken,
+          result: existing.result
+        };
       }
     }
 
@@ -849,6 +961,9 @@ class DurableClaimStore {
       claimedAt: new Date(now).toISOString(),
       leaseExpiresAt,
       completedAt: null,
+      deferredAt: null,
+      deferredReason: null,
+      acknowledgedAt: null,
       result: null,
       lastError: null,
       retryCount: (existing?.retryCount || 0) + (existing?.status === 'failed' || existing?.status === 'recovered' ? 1 : 0)
@@ -866,6 +981,44 @@ class DurableClaimStore {
     };
   }
 
+  // Ordem 039: Conclusão verificada comprovada (somente quando 100% resolvido com recibos)
+  completeClaim(ticketId, attemptId, result = {}, options = {}) {
+    this.loadClaims();
+    const now = options.now || Date.now();
+    const claim = this.claims.get(ticketId);
+
+    if (!claim) return { completed: false, reason: 'claim_not_found' };
+    if (claim.attemptId !== attemptId) return { completed: false, reason: 'stale_attempt_or_fencing_mismatch', currentAttemptId: claim.attemptId };
+
+    claim.status = 'completed';
+    claim.completedAt = new Date(now).toISOString();
+    claim.result = result;
+    claim.lastError = null;
+    this.saveClaims();
+
+    return { completed: true, attemptId, fencingToken: claim.fencingToken };
+  }
+
+  // Ordem 039: Retenção para verificação de governança (job NÃO finalizado; pendente de homologação humana)
+  deferClaim(ticketId, attemptId, reason = 'pending_verification', result = {}, options = {}) {
+    this.loadClaims();
+    const now = options.now || Date.now();
+    const claim = this.claims.get(ticketId);
+
+    if (!claim) return { deferred: false, reason: 'claim_not_found' };
+    if (claim.attemptId !== attemptId) return { deferred: false, reason: 'stale_attempt_or_fencing_mismatch', currentAttemptId: claim.attemptId };
+
+    claim.status = 'deferred';
+    claim.deferredAt = new Date(now).toISOString();
+    claim.deferredReason = reason;
+    claim.completedAt = null; // Estritamente NÃO completado
+    claim.result = result;
+    this.saveClaims();
+
+    return { deferred: true, attemptId, fencingToken: claim.fencingToken, reason };
+  }
+
+  // Ordem 039: Semântica estrita de ACK: direciona conforme status real
   ackClaim(ticketId, attemptId, result = {}, options = {}) {
     this.loadClaims();
     const now = options.now || Date.now();
@@ -879,12 +1032,30 @@ class DurableClaimStore {
       return { acked: false, reason: 'stale_attempt_or_fencing_mismatch', currentAttemptId: claim.attemptId };
     }
 
-    claim.status = 'acked';
-    claim.completedAt = new Date(now).toISOString();
+    // Se o resultado for de retenção de governança, deferir
+    if (result && (result.status === 'pending_verification' || result.status === 'deferred')) {
+      return this.deferClaim(ticketId, attemptId, result.status, result, options);
+    }
+
+    // Se o resultado for de conclusão real verificada
+    if (result && (result.status === 'resolved' || result.status === 'completed' || result.progressPercentage === 100 || result.buildStatus === 'ready' || result.completed === true)) {
+      return this.completeClaim(ticketId, attemptId, result, options);
+    }
+
+    // Se for falha explícita
+    if (result && (result.success === false || result.error)) {
+      this.releaseClaim(ticketId, attemptId, result.error || 'execution_failed', options);
+      return { acked: false, reason: 'job_failed', error: result.error };
+    }
+
+    // Reconhecimento intermediário (ex: 25% aguardando código)
+    claim.status = 'acknowledged';
+    claim.acknowledgedAt = new Date(now).toISOString();
+    claim.completedAt = null;
     claim.result = result;
     this.saveClaims();
 
-    return { acked: true, attemptId, fencingToken: claim.fencingToken };
+    return { acked: true, attemptId, fencingToken: claim.fencingToken, status: 'acknowledged' };
   }
 
   releaseClaim(ticketId, attemptId, reason = 'error', options = {}) {
@@ -940,6 +1111,16 @@ function acquireClaim(ticketId, currentStatus, options = {}) {
 function ackClaim(ticketId, attemptId, result = {}, options = {}) {
   const store = getActiveClaimStore(options.deps || {});
   return store.ackClaim(ticketId, attemptId, result, options);
+}
+
+function completeClaim(ticketId, attemptId, result = {}, options = {}) {
+  const store = getActiveClaimStore(options.deps || {});
+  return store.completeClaim(ticketId, attemptId, result, options);
+}
+
+function deferClaim(ticketId, attemptId, reason = 'pending_verification', result = {}, options = {}) {
+  const store = getActiveClaimStore(options.deps || {});
+  return store.deferClaim(ticketId, attemptId, reason, result, options);
 }
 
 function releaseClaim(ticketId, attemptId, reason = 'error', options = {}) {
@@ -1000,8 +1181,24 @@ async function runWatchdogCycle(options = {}) {
     try {
       console.log(`[WATCHDOG LEASE] Adquirido lease [${attemptId}] para o chamado [${t.code}].`);
       const procResult = await processTicket(t, { ...options, attemptId, fencingToken: claim.fencingToken }, options.deps);
-      ackClaim(t.id, attemptId, procResult, { deps: options.deps });
-      processedCount++;
+
+      // Ordem 039: Distinguir terminantemente pending_verification, completed, acknowledged e failed
+      if (procResult.status === 'pending_verification' || !options.allowAutonomousDeploy) {
+        console.log(`[WATCHDOG DEFERRED] Chamado [${t.code}] retido para homologação de governança (pending_verification).`);
+        deferClaim(t.id, attemptId, 'pending_verification', procResult, { deps: options.deps });
+        processedCount++;
+      } else if (procResult.status === 'resolved' || procResult.status === 'completed' || procResult.progressPercentage === 100) {
+        console.log(`[WATCHDOG COMPLETED] Chamado [${t.code}] concluído com verificação comprovada.`);
+        completeClaim(t.id, attemptId, procResult, { deps: options.deps });
+        processedCount++;
+      } else if (procResult.success === false || procResult.error) {
+        console.warn(`[WATCHDOG FAILED] Chamado [${t.code}] falhou no processamento: ${procResult.error}`);
+        releaseClaim(t.id, attemptId, procResult.error, { deps: options.deps });
+      } else {
+        // Intermediário verificado (ex: 25% aguardando código)
+        ackClaim(t.id, attemptId, procResult, { deps: options.deps });
+        processedCount++;
+      }
     } catch (err) {
       console.error(`[WATCHDOG] Falha ao processar chamado [${t.code}] (attempt: ${attemptId}):`, err.message);
       releaseClaim(t.id, attemptId, err.message, { deps: options.deps });
@@ -1067,9 +1264,13 @@ module.exports = {
   DurableClaimStore,
   acquireClaim,
   ackClaim,
+  completeClaim,
+  deferClaim,
   releaseClaim,
   recoverOrphanedClaims,
   getClaim,
+  safeParseHttpResponse,
+  safeSanitizeUrl,
 };
 
 if (require.main === module) {

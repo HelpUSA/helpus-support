@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start --port 3012",
     "lint": "next lint",
-    "test": "node scripts/test_remediation_p0_p1.mjs && tsx scripts/test_store_behavior.mjs && tsx scripts/test_order031_architecture.mjs && tsx scripts/test_order035_durable_queue.mjs"
+    "test": "node scripts/test_remediation_p0_p1.mjs && tsx scripts/test_store_behavior.mjs && tsx scripts/test_order031_architecture.mjs && tsx scripts/test_order035_durable_queue.mjs && tsx scripts/test_order039_diagnostics.mjs"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.2",

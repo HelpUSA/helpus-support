@@ -2084,6 +2084,22 @@ if (require.main === module) {
     const res = resetDailyBudget();
     console.log(JSON.stringify(res, null, 2));
     process.exit(res.ok ? 0 : 1);
+  } else if (args.some(a => a.startsWith('--dispatch-approved-sbx='))) {
+    // Ordem 056: only a signed, remotely persisted SBX Master approval may be queued.
+    const id = args.find(a => a.startsWith('--dispatch-approved-sbx=')).slice('--dispatch-approved-sbx='.length);
+    const { dispatchSandboxApprovedOnDemand } = require('./approval_outbox.js');
+    const { dispatchSandboxTicket } = require('./sandbox_dispatch.js');
+    const paused = isWorkerPaused().paused;
+    const confirmed = args.includes('--send-local');
+    dispatchSandboxApprovedOnDemand(id, {
+      paused, confirmed, allowedTenantIds: ['sandbox'],
+      fetchTickets: () => fetchTickets({}, {isManual:true}),
+      verifyEvent: verifyTicketEventIntegrity,
+      dispatch: dispatchSandboxTicket,
+    }).then(result => {
+      console.log(JSON.stringify(result,null,2));
+      process.exit(result.ok?0:1);
+    }).catch(err=>{console.error('[APPROVAL OUTBOX] Fail closed:',err.message);process.exit(1)});
   } else if (args.some(a => a.startsWith('--dispatch-ticket='))) {
     // Ordem 053: SBX local-only; dry-run by default; zero GitHub requests.
     const ticketId = args.find(a => a.startsWith('--dispatch-ticket=')).split('=')[1];
@@ -2091,7 +2107,8 @@ if (require.main === module) {
     const pause = isWorkerPaused();
     dispatchSandboxTicket(ticketId, {
       paused: pause.paused,
-      confirmed: args.includes('--send-local'),
+      // Historical 053 CLI is now dry-run only. Real local sends require signed outbox verification.
+      confirmed: false,
     }).then(result => {
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.ok ? 0 : 1);

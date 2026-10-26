@@ -16,6 +16,7 @@ export type TicketEventType =
 export interface TicketEvent {
   id: string; // eventId
   ticketId: string;
+  tenantId?: string; // cryptographically bound by computeEventPayload if present
   type: TicketEventType;
   actorEmail: string;
   actorRole: 'master_superadmin' | 'superadmin' | 'tenant_admin' | 'client' | 'system_pipeline';

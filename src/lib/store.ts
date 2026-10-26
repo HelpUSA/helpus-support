@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import https from 'https';
+import { randomUUID } from 'node:crypto';
 import { Ticket, Tenant, Message, Attachment, TicketEvent } from '@/types/ticket';
 import { INITIAL_TENANTS } from '@/lib/tenants';
 import { notificationService } from '@/lib/notifications';
@@ -1216,9 +1217,14 @@ export class TicketStore {
       createdAt: new Date().toISOString(),
     });
 
+    const approvalEventId = `evt-appr-${randomUUID()}`;
     const apprEvt: TicketEvent = {
-      id: `evt-appr-${Date.now()}`,
+      id: approvalEventId,
       ticketId: ticket.id,
+      tenantId: ticket.tenantId,
+      // Transactional outbox: signed, immutable job identity in the same persisted ticket JSON.
+      // NO dispatch occurs here; downstream Windows pull requires separate authority and ACK.
+      idempotencyKey: `helpus-approval-outbox-v1:${ticket.id}:${approvalEventId}`,
       type: 'master_approved',
       actorEmail: options?.actorEmail || 'master.superadmin@helpusbr.com',
       actorRole: 'master_superadmin',

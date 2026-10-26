@@ -33,6 +33,15 @@ function buildSandboxEnvelope(ticketId) {
 
 async function dispatchSandboxTicket(ticketId, opts={}) {
   const envelope=buildSandboxEnvelope(ticketId);
+  if(opts.commandId){
+    if(!opts.verifiedApproval || opts.verifiedApproval.ok!==true ||
+       !/^HU-SBX-APPROVED-SBX-[A-Z0-9-]+-[a-f0-9]{20}$/.test(opts.commandId)) {
+      return {ok:false,phase:'blocked',reason:'unverified_approval_command',networkCalls:0};
+    }
+    envelope.command_id=opts.commandId;
+    envelope.payload.approvalEventId=opts.verifiedApproval.approvalEventId;
+    envelope.payload.approvalJobKey=opts.verifiedApproval.jobKey;
+  }
   // Zero I/O by default. A posting to the real bridge may invoke a model and incur quota.
   if (opts.paused) return {ok:false,phase:'blocked',reason:'worker_paused',networkCalls:0};
   const env=opts.env||process.env;

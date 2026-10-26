@@ -2107,6 +2107,19 @@ if (require.main === module) {
     });
     console.log(JSON.stringify(report,null,2));
     process.exit(report.ok?0:1);
+  } else if (args.some(a => a.startsWith('--verify-approved-sbx='))) {
+    // Ordem 072: one authenticated GET + HMAC check. Never dispatch.
+    const ticketId=args.find(a=>a.startsWith('--verify-approved-sbx=')).slice('--verify-approved-sbx='.length);
+    const {verifyApprovedSandboxOnce}=require('./staging_signed_approval_probe.js');
+    const result=verifyApprovedSandboxOnce(ticketId,{
+      paused:isWorkerPaused().paused,
+      confirmed:args.includes('--confirmed-readonly'),
+      env:process.env,
+      reserve:kind=>reserveExternalRequest(kind),
+      verifyEvent:verifyTicketEventIntegrity
+    });
+    console.log(JSON.stringify(result,null,2));
+    process.exit(result.ok?0:1);
   } else if (args.some(a => a.startsWith('--dispatch-approved-sbx='))) {
     // Ordem 056: only a signed, remotely persisted SBX Master approval may be queued.
     const id = args.find(a => a.startsWith('--dispatch-approved-sbx=')).slice('--dispatch-approved-sbx='.length);

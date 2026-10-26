@@ -113,6 +113,13 @@ export async function POST(request: NextRequest) {
       clientTicketCount: body.clientTicketCount,
     } as any);
 
+    if (!newTicket) {
+      return NextResponse.json(
+        { success: false, error: 'Falha na persistência remota ao criar chamado na nuvem.' },
+        { status: 500, headers: ANTI_CACHE_HEADERS }
+      );
+    }
+
     return NextResponse.json({ success: true, data: projectTicketForUser(newTicket, auth.isSuperAdmin) }, { status: 201, headers: ANTI_CACHE_HEADERS });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message || 'Erro ao criar ticket' }, { status: 500, headers: ANTI_CACHE_HEADERS });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { ticketStore } from '@/lib/store';
+import { ticketStore, INITIAL_TICKETS } from '@/lib/store';
 import { aiAutoCodingWorker } from '@/lib/aiWorker';
 import { getAutoResolutionDetails } from '@/lib/aiResolver';
 import { validateServerApiAccess, projectTicketForUser } from '@/lib/serverAuth';
@@ -112,9 +112,16 @@ export async function PATCH(
           { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
+      const existing = ticketStore.getTicketById(id);
+      if (!existing && !INITIAL_TICKETS.some(t => t.id === id || t.code === id)) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
       const updated = await ticketStore.resetTicket(id);
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+        return NextResponse.json(
+          { success: false, error: 'Falha na persistência remota ao reiniciar o chamado na nuvem.' },
+          { status: 500, headers: ANTI_CACHE_HEADERS }
+        );
       }
       return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
@@ -136,6 +143,12 @@ export async function PATCH(
         body.ticketData
       );
       if (!updated) {
+        if (cloudSaveResult && !cloudSaveResult.success) {
+          return NextResponse.json(
+            { success: false, error: `Falha na persistência remota ao autorizar chamado: ${cloudSaveResult.error}`, cloudSaveResult },
+            { status: 500, headers: ANTI_CACHE_HEADERS }
+          );
+        }
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
 
@@ -150,12 +163,19 @@ export async function PATCH(
           { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
+      const existing = ticketStore.getTicketById(id);
+      if (!existing) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
       const updated = await ticketStore.completeTicketProductionAsync(id, {
         success: true,
         solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
       });
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+        return NextResponse.json(
+          { success: false, error: 'Falha na persistência remota ao concluir o chamado na nuvem.' },
+          { status: 500, headers: ANTI_CACHE_HEADERS }
+        );
       }
       return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
@@ -298,7 +318,10 @@ export async function PATCH(
         body.userName || (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente')
       );
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+        return NextResponse.json(
+          { success: false, error: 'Falha na persistência remota ao reabrir o chamado na nuvem.' },
+          { status: 500, headers: ANTI_CACHE_HEADERS }
+        );
       }
       return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }

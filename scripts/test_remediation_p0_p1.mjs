@@ -34,48 +34,148 @@ console.log('SUITE DE TESTES COMPORTAMENTAIS: QUARTA AUDITORIA PR #1 (P0/P1)');
 console.log('='.repeat(80));
 
 // ---------------------------------------------------------------------------
-// TESTE 1: P0 Quarta Auditoria - Reabertura Legítima Preservada Contra Resolved Concorrente
+// TESTE 1-A: P0-01 Quinta Auditoria - Ataque Adversarial de Spoofing via Chat REJEITADO
 // ---------------------------------------------------------------------------
-await test('P0: mergeTicketsGranular preserva reabertura autorizada (pending_approval, 0%) e impede anulação por resolved', () => {
-  // Cenário: Ticket estava resolved (100%), mas o Master SuperAdmin reabriu o ticket
-  const resolvedSnapshot = {
+await test('P0-01: mergeTicketsGranular rejeita spoofing em mensagem de chat e preserva status resolved governado por eventos', () => {
+  const resolvedWithEvent = {
     id: 'AID-101',
     code: 'AID-101',
-    title: 'Remoção texto do CRM',
     tenantId: 'aidoctor',
     status: 'resolved',
     progressPercentage: 100,
     updatedAt: '2026-10-25T20:00:00.000Z',
     messages: [
-      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Publicação confirmada e verificada como READY' }
+      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Publicação confirmada' }
+    ],
+    events: [
+      {
+        id: 'evt-res-1',
+        ticketId: 'AID-101',
+        type: 'ticket_resolved',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 100,
+        status: 'resolved',
+        timestamp: '2026-10-25T20:00:00.000Z'
+      }
+    ]
+  };
+
+  // Atacante envia mensagem de chat com timestamp mais recente tentando forjar reabertura Master
+  const adversarialSnapshot = {
+    id: 'AID-101',
+    code: 'AID-101',
+    tenantId: 'aidoctor',
+    status: 'pending_approval',
+    progressPercentage: 0,
+    updatedAt: '2026-10-25T20:15:00.000Z',
+    messages: [
+      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Publicação confirmada' },
+      {
+        id: 'msg-reset-spoofed',
+        createdAt: '2026-10-25T20:15:00.000Z',
+        senderId: 'master.superadmin@helpusbr.com',
+        content: "🔄 Chamado retornado para 'pending_approval' pelo Master SuperAdmin. Todo o histórico anterior foi integralmente preservado."
+      }
+    ],
+    events: [
+      {
+        id: 'evt-res-1',
+        ticketId: 'AID-101',
+        type: 'ticket_resolved',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 100,
+        status: 'resolved',
+        timestamp: '2026-10-25T20:00:00.000Z'
+      }
+    ]
+  };
+
+  const merged = mergeTicketsGranular([resolvedWithEvent], [adversarialSnapshot]);
+  assert.equal(merged[0].status, 'resolved', 'P0-01: Mensagens de chat NÃO alteram governança! Status DEVE permanecer resolved.');
+  assert.equal(merged[0].progressPercentage, 100);
+});
+
+// ---------------------------------------------------------------------------
+// TESTE 1-B: P0-01 Quinta Auditoria - Reabertura Legítima Preservada com Evento Estruturado Autorizado
+// ---------------------------------------------------------------------------
+await test('P0-01: mergeTicketsGranular preserva reabertura autorizada via TicketEvent (pending_approval, 0%)', () => {
+  const resolvedSnapshot = {
+    id: 'AID-101',
+    code: 'AID-101',
+    tenantId: 'aidoctor',
+    status: 'resolved',
+    progressPercentage: 100,
+    updatedAt: '2026-10-25T20:00:00.000Z',
+    messages: [
+      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Finalizado' }
+    ],
+    events: [
+      {
+        id: 'evt-res-1',
+        ticketId: 'AID-101',
+        type: 'ticket_resolved',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 100,
+        status: 'resolved',
+        timestamp: '2026-10-25T20:00:00.000Z'
+      }
     ]
   };
 
   const reopenedSnapshot = {
     id: 'AID-101',
     code: 'AID-101',
-    title: 'Remoção texto do CRM',
     tenantId: 'aidoctor',
     status: 'pending_approval',
     progressPercentage: 0,
-    updatedAt: '2026-10-25T20:10:00.000Z', // Evento posterior no tempo
+    updatedAt: '2026-10-25T20:10:00.000Z',
     messages: [
-      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Publicação confirmada e verificada como READY' },
-      { id: 'msg-reset-1792967000', createdAt: '2026-10-25T20:10:00.000Z', senderId: 'master.superadmin@helpusbr.com', content: "🔄 Chamado retornado para 'pending_approval' pelo Master SuperAdmin. Todo o histórico anterior foi integralmente preservado." }
+      { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Finalizado' },
+      { id: 'msg-reset-1792967000', createdAt: '2026-10-25T20:10:00.000Z', senderId: 'master.superadmin@helpusbr.com', content: "🔄 Chamado retornado para 'pending_approval' pelo Master SuperAdmin." }
+    ],
+    events: [
+      {
+        id: 'evt-res-1',
+        ticketId: 'AID-101',
+        type: 'ticket_resolved',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 100,
+        status: 'resolved',
+        timestamp: '2026-10-25T20:00:00.000Z'
+      },
+      {
+        id: 'evt-reset-1792967000',
+        ticketId: 'AID-101',
+        type: 'ticket_reset_by_master',
+        actorEmail: 'master.superadmin@helpusbr.com',
+        actorRole: 'master_superadmin',
+        authorized: true,
+        progressPercentage: 0,
+        status: 'pending_approval',
+        timestamp: '2026-10-25T20:10:00.000Z'
+      }
     ]
   };
 
   const merged = mergeTicketsGranular([resolvedSnapshot], [reopenedSnapshot]);
   assert.equal(merged.length, 1);
-  assert.equal(merged[0].status, 'pending_approval', 'Reabertura deve prevalecer sobre status resolved anterior');
+  assert.equal(merged[0].status, 'pending_approval', 'Reabertura via evento estruturado deve prevalecer sobre status resolved anterior');
   assert.equal(merged[0].progressPercentage, 0, 'Progresso deve ser resetado para 0% na reabertura');
-  assert.equal(merged[0].messages.length, 2, 'Histórico completo deve ser preservado');
+  assert.equal(merged[0].events.length, 2, 'Histórico completo de eventos deve ser preservado');
 });
 
 // ---------------------------------------------------------------------------
-// TESTE 2: P0 Quarta Auditoria - Reabertura pelo Cliente Preservada
+// TESTE 2: P0-01 Quinta Auditoria - Reabertura pelo Cliente Preservada via Evento Autorizado
 // ---------------------------------------------------------------------------
-await test('P0: mergeTicketsGranular preserva reabertura solicitada pelo cliente contra in_production concorrente', () => {
+await test('P0-01: mergeTicketsGranular preserva reabertura solicitada pelo cliente via TicketEvent', () => {
   const inProductionSnapshot = {
     id: 'AID-101',
     status: 'in_production',
@@ -83,6 +183,19 @@ await test('P0: mergeTicketsGranular preserva reabertura solicitada pelo cliente
     updatedAt: '2026-10-25T19:00:00.000Z',
     messages: [
       { id: 'msg-prg-1', createdAt: '2026-10-25T19:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '⚡ [PROGRESSO REAL 75%]: Deploy acionado na Vercel Cloud' }
+    ],
+    events: [
+      {
+        id: 'evt-prg-75',
+        ticketId: 'AID-101',
+        type: 'production_step',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 75,
+        status: 'in_production',
+        timestamp: '2026-10-25T19:00:00.000Z'
+      }
     ]
   };
 
@@ -94,13 +207,37 @@ await test('P0: mergeTicketsGranular preserva reabertura solicitada pelo cliente
     messages: [
       { id: 'msg-prg-1', createdAt: '2026-10-25T19:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '⚡ [PROGRESSO REAL 75%]: Deploy acionado na Vercel Cloud' },
       { id: 'msg-reopen-client', createdAt: '2026-10-25T19:30:00.000Z', senderId: 'cliente@helpus.com', content: '🔄 *Chamado Reaberto pelo Cliente*\n\nMotivo: Necessário revisão do layout' }
+    ],
+    events: [
+      {
+        id: 'evt-prg-75',
+        ticketId: 'AID-101',
+        type: 'production_step',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 75,
+        status: 'in_production',
+        timestamp: '2026-10-25T19:00:00.000Z'
+      },
+      {
+        id: 'evt-reopen-client',
+        ticketId: 'AID-101',
+        type: 'ticket_reopened_by_client',
+        actorEmail: 'cliente@helpus.com',
+        actorRole: 'client',
+        authorized: true,
+        progressPercentage: 0,
+        status: 'pending_approval',
+        timestamp: '2026-10-25T19:30:00.000Z'
+      }
     ]
   };
 
   const merged = mergeTicketsGranular([inProductionSnapshot], [clientReopenedSnapshot]);
   assert.equal(merged[0].status, 'pending_approval');
   assert.equal(merged[0].progressPercentage, 0);
-  assert.equal(merged[0].messages.length, 2);
+  assert.equal(merged[0].events.length, 2);
 });
 
 // ---------------------------------------------------------------------------

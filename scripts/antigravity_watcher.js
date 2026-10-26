@@ -48,67 +48,66 @@ const TENANTS = {
 let cloudSha = null;
 
 // Reconciliação causal de ciclo de vida e estado (P0 Quarta Auditoria)
-function reconcileTicketLifecycle(localT, remoteT, mergedMessages) {
-  // 1. Inspecionar o histórico cronológico de trás para frente para encontrar o evento de transição causal mais recente
-  for (let i = mergedMessages.length - 1; i >= 0; i--) {
-    const msg = mergedMessages[i];
-    const content = msg.content || '';
-    const msgId = msg.id || '';
+// P0-01 (Quinta Auditoria): Reconciliação causal baseada EXCLUSIVAMENTE em eventos estruturados autorizados
+// Mensagens de texto são apenas camada de apresentação; nunca autoridade de governança
+function reconcileTicketLifecycle(localT, remoteT, mergedEvents) {
+  // 1. Inspecionar o log cronológico de eventos estruturados autorizados de trás para frente
+  if (Array.isArray(mergedEvents) && mergedEvents.length > 0) {
+    for (let i = mergedEvents.length - 1; i >= 0; i--) {
+      const evt = mergedEvents[i];
+      if (!evt || !evt.authorized) continue; // Ignora qualquer evento sem autorização servidora comprovada
 
-    // Reabertura explícita autorizada pelo Master SuperAdmin ou solicitada pelo Cliente
-    if (
-      msgId.startsWith('msg-reset-') ||
-      content.includes("retornado para 'pending_approval'") ||
-      content.includes('Chamado Reaberto') ||
-      content.includes('Aguardando Nova Aprovação Master')
-    ) {
-      return {
-        status: 'pending_approval',
-        progressPercentage: 0,
-        reopenedAt: msg.createdAt,
-      };
-    }
+      // Reabertura legítima comprovada pelo Master SuperAdmin ou solicitada pelo Cliente
+      if (evt.type === 'ticket_reset_by_master' || evt.type === 'ticket_reopened_by_client') {
+        return {
+          status: 'pending_approval',
+          progressPercentage: 0,
+          reopenedAt: evt.timestamp,
+        };
+      }
 
-    // Resolução / Conclusão
-    if (content.includes('CONCLUÍDO & RESOLVIDO') || content.includes('Publicação confirmada e verificada')) {
-      return {
-        status: 'resolved',
-        progressPercentage: 100,
-      };
-    }
+      // Resolução / Conclusão comprovada em produção
+      if (evt.type === 'ticket_resolved') {
+        return {
+          status: 'resolved',
+          progressPercentage: 100,
+        };
+      }
 
-    // Etapas de produção
-    if (content.includes('PROGRESSO REAL 75%') || content.includes('Deploy acionado na Vercel')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 75,
-      };
-    }
+      // Etapas de produção comprovadas
+      if (evt.type === 'production_step') {
+        return {
+          status: 'in_production',
+          progressPercentage: evt.progressPercentage || 0,
+        };
+      }
 
-    if (content.includes('PROGRESSO REAL 50%') || content.includes('Alteração técnica comprovada')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 50,
-      };
-    }
+      // Aprovação inicial pelo Master SuperAdmin
+      if (evt.type === 'master_approved') {
+        return {
+          status: 'in_production',
+          progressPercentage: 0,
+        };
+      }
 
-    if (content.includes('PROGRESSO REAL 25%') || content.includes('Requisitos validados')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 25,
-      };
-    }
+      // Recusa ou Cancelamento
+      if (evt.type === 'ticket_rejected') {
+        return {
+          status: 'rejected',
+          progressPercentage: 0,
+        };
+      }
 
-    // Aprovação inicial
-    if (content.includes('Aprovação Concedida') || content.includes('Autorizando envio para produção')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 0,
-      };
+      if (evt.type === 'ticket_cancelled') {
+        return {
+          status: 'closed',
+          progressPercentage: 0,
+        };
+      }
     }
   }
 
-  // 2. Fallback causal caso nenhuma mensagem de transição explícita seja identificada: versão mais recente por updatedAt
+  // 2. Fallback caso não existam eventos estruturados históricos: versão com updatedAt mais recente
   const localUpdated = localT.updatedAt || '';
   const remoteUpdated = remoteT.updatedAt || '';
   const newest = localUpdated >= remoteUpdated ? localT : remoteT;
@@ -124,14 +123,14 @@ function reconcileTicketLifecycle(localT, remoteT, mergedMessages) {
 function mergeTicketsGranular(remoteTickets, localTickets) {
   const map = new Map();
 
-  for (const t of remoteTickets) {
-    map.set(t.id, { ...t, messages: [...(t.messages || [])] });
+  for (const t of (remoteTickets || [])) {
+    map.set(t.id, { ...t, messages: [...(t.messages || [])], events: [...(t.events || [])] });
   }
 
-  for (const localT of localTickets) {
+  for (const localT of (localTickets || [])) {
     const remoteT = map.get(localT.id);
     if (!remoteT) {
-      map.set(localT.id, { ...localT, messages: [...(localT.messages || [])] });
+      map.set(localT.id, { ...localT, messages: [...(localT.messages || [])], events: [...(localT.events || [])] });
     } else {
       const mergedMessagesMap = new Map();
       for (const m of (remoteT.messages || [])) {
@@ -147,8 +146,22 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
         (a.createdAt || '').localeCompare(b.createdAt || '')
       );
 
-      // P0 Quarta Auditoria: Reconciliação causal de eventos para preservar reaberturas legítimas
-      const lifecycle = reconcileTicketLifecycle(localT, remoteT, mergedMessages);
+      // P0-01 (Quinta Auditoria): Mesclar e preservar 100% dos eventos estruturados de governança
+      const mergedEventsMap = new Map();
+      for (const e of (remoteT.events || [])) {
+        const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+        mergedEventsMap.set(key, e);
+      }
+      for (const e of (localT.events || [])) {
+        const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+        mergedEventsMap.set(key, e);
+      }
+      const mergedEvents = Array.from(mergedEventsMap.values()).sort((a, b) =>
+        (a.timestamp || '').localeCompare(b.timestamp || '')
+      );
+
+      // Reconciliação causal baseada EXCLUSIVAMENTE em eventos estruturados autorizados
+      const lifecycle = reconcileTicketLifecycle(localT, remoteT, mergedEvents);
       const localUpdated = localT.updatedAt || '';
       const remoteUpdated = remoteT.updatedAt || '';
       const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
@@ -159,6 +172,7 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
         progressPercentage: lifecycle.progressPercentage,
         reopenedAt: lifecycle.reopenedAt || baseTicket.reopenedAt,
         messages: mergedMessages,
+        events: mergedEvents,
       });
     }
   }
@@ -499,6 +513,20 @@ async function processTicket(ticket, options = {}, deps = {}) {
       isInternalNote: false,
       content: msgContent,
       createdAt: new Date().toISOString(),
+    });
+
+    target.events = Array.isArray(target.events) ? target.events : [];
+    target.events.push({
+      id: `evt-pipe-${Date.now()}-${percentage}`,
+      ticketId: target.id,
+      type: percentage === 100 ? 'ticket_resolved' : 'production_step',
+      actorEmail: percentage === 100 ? 'ia.engine@helpusbr.com' : 'ci.cd@helpusbr.com',
+      actorRole: 'system_pipeline',
+      authorized: true,
+      progressPercentage: percentage,
+      status: newStatus,
+      note: stepMsg,
+      timestamp: new Date().toISOString()
     });
 
     return await saveTickets(freshTickets, 3, deps);

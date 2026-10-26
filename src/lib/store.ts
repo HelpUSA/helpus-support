@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import https from 'https';
-import { Ticket, Tenant, Message, Attachment } from '@/types/ticket';
+import { Ticket, Tenant, Message, Attachment, TicketEvent } from '@/types/ticket';
 import { INITIAL_TENANTS } from '@/lib/tenants';
 import { notificationService } from '@/lib/notifications';
 import { emailService } from '@/lib/emailService';
@@ -92,8 +92,70 @@ export const INITIAL_TICKETS: Ticket[] = [
         createdAt: "2026-10-25T19:25:00.000Z"
       }
     ],
+    events: [
+      {
+        id: "evt-aid-001",
+        ticketId: "tck-1792960000000",
+        type: "ticket_created",
+        actorEmail: "helpus.ecommerce@gmail.com",
+        actorRole: "client",
+        authorized: true,
+        progressPercentage: 0,
+        status: "pending_approval",
+        note: "Retire o texto circulado na imagem em anexo",
+        timestamp: "2026-10-25T17:30:00.000Z"
+      },
+      {
+        id: "evt-aid-002",
+        ticketId: "tck-1792960000000",
+        type: "master_approved",
+        actorEmail: "master.superadmin@helpusbr.com",
+        actorRole: "master_superadmin",
+        authorized: true,
+        progressPercentage: 0,
+        status: "in_production",
+        note: "Aprovação Concedida pelo Administrador HelpUS",
+        timestamp: "2026-10-25T17:34:00.000Z"
+      },
+      {
+        id: "evt-aid-003",
+        ticketId: "tck-1792960000000",
+        type: "production_step",
+        actorEmail: "ci.cd@helpusbr.com",
+        actorRole: "system_pipeline",
+        authorized: true,
+        progressPercentage: 75,
+        status: "in_production",
+        note: "Deploy acionado na Vercel",
+        timestamp: "2026-10-25T17:34:05.000Z"
+      },
+      {
+        id: "evt-aid-004",
+        ticketId: "tck-1792960000000",
+        type: "ticket_resolved",
+        actorEmail: "ci.cd@helpusbr.com",
+        actorRole: "system_pipeline",
+        authorized: true,
+        progressPercentage: 100,
+        status: "resolved",
+        note: "Deploy realizado em produção na Vercel com sucesso",
+        timestamp: "2026-10-25T17:53:00.000Z"
+      },
+      {
+        id: "evt-aid-005",
+        ticketId: "tck-1792960000000",
+        type: "ticket_reopened_by_client",
+        actorEmail: "helpus.ecommerce@gmail.com",
+        actorRole: "client",
+        authorized: true,
+        progressPercentage: 0,
+        status: "pending_approval",
+        note: "a mensagem ainda continua.",
+        timestamp: "2026-10-25T19:25:00.000Z"
+      }
+    ],
     createdAt: "2026-10-25T17:30:00.000Z",
-    updatedAt: "2026-10-25T17:53:00.000Z"
+    updatedAt: "2026-10-25T19:25:00.000Z"
   },
   {
     id: "tck-1791240000000",
@@ -420,72 +482,70 @@ function githubApiRequest(method: string, path: string, body?: any): Promise<{ s
   });
 }
 
-// Reconciliação causal de ciclo de vida e estado (P0 Quarta Auditoria)
+// P0-01 (Quinta Auditoria): Reconciliação causal baseada EXCLUSIVAMENTE em eventos estruturados autorizados
+// Mensagens de texto são apenas camada de apresentação; nunca autoridade de governança
 export function reconcileTicketLifecycle(
   localT: Ticket,
   remoteT: Ticket,
-  mergedMessages: any[]
+  mergedEvents: TicketEvent[]
 ): { status: any; progressPercentage: number; reopenedAt?: string } {
-  // 1. Inspecionar o histórico cronológico de trás para frente para encontrar o evento de transição causal mais recente
-  for (let i = mergedMessages.length - 1; i >= 0; i--) {
-    const msg = mergedMessages[i];
-    const content = msg.content || '';
-    const msgId = msg.id || '';
+  // 1. Inspecionar o log cronológico de eventos estruturados autorizados de trás para frente
+  if (Array.isArray(mergedEvents) && mergedEvents.length > 0) {
+    for (let i = mergedEvents.length - 1; i >= 0; i--) {
+      const evt = mergedEvents[i];
+      if (!evt || !evt.authorized) continue; // Ignora qualquer evento sem autorização servidora comprovada
 
-    // Reabertura explícita autorizada pelo Master SuperAdmin ou solicitada pelo Cliente
-    if (
-      msgId.startsWith('msg-reset-') ||
-      content.includes("retornado para 'pending_approval'") ||
-      content.includes('Chamado Reaberto') ||
-      content.includes('Aguardando Nova Aprovação Master')
-    ) {
-      return {
-        status: 'pending_approval',
-        progressPercentage: 0,
-        reopenedAt: msg.createdAt,
-      };
-    }
+      // Reabertura legítima comprovada pelo Master SuperAdmin ou solicitada pelo Cliente
+      if (evt.type === 'ticket_reset_by_master' || evt.type === 'ticket_reopened_by_client') {
+        return {
+          status: 'pending_approval',
+          progressPercentage: 0,
+          reopenedAt: evt.timestamp,
+        };
+      }
 
-    // Resolução / Conclusão
-    if (content.includes('CONCLUÍDO & RESOLVIDO') || content.includes('Publicação confirmada e verificada')) {
-      return {
-        status: 'resolved',
-        progressPercentage: 100,
-      };
-    }
+      // Resolução / Conclusão comprovada em produção
+      if (evt.type === 'ticket_resolved') {
+        return {
+          status: 'resolved',
+          progressPercentage: 100,
+        };
+      }
 
-    // Etapas de produção
-    if (content.includes('PROGRESSO REAL 75%') || content.includes('Deploy acionado na Vercel')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 75,
-      };
-    }
+      // Etapas de produção comprovadas
+      if (evt.type === 'production_step') {
+        return {
+          status: 'in_production',
+          progressPercentage: evt.progressPercentage || 0,
+        };
+      }
 
-    if (content.includes('PROGRESSO REAL 50%') || content.includes('Alteração técnica comprovada')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 50,
-      };
-    }
+      // Aprovação inicial pelo Master SuperAdmin
+      if (evt.type === 'master_approved') {
+        return {
+          status: 'in_production',
+          progressPercentage: 0,
+        };
+      }
 
-    if (content.includes('PROGRESSO REAL 25%') || content.includes('Requisitos validados')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 25,
-      };
-    }
+      // Recusa ou Cancelamento
+      if (evt.type === 'ticket_rejected') {
+        return {
+          status: 'rejected',
+          progressPercentage: 0,
+        };
+      }
 
-    // Aprovação inicial
-    if (content.includes('Aprovação Concedida') || content.includes('Autorizando envio para produção')) {
-      return {
-        status: 'in_production',
-        progressPercentage: 0,
-      };
+      if (evt.type === 'ticket_cancelled') {
+        return {
+          status: 'closed',
+          progressPercentage: 0,
+        };
+      }
     }
   }
 
-  // 2. Fallback causal caso nenhuma mensagem de transição explícita seja identificada: versão mais recente por updatedAt
+  // 2. Fallback caso não existam eventos estruturados históricos: versão com updatedAt mais recente
   const localUpdated = localT.updatedAt || '';
   const remoteUpdated = remoteT.updatedAt || '';
   const newest = localUpdated >= remoteUpdated ? localT : remoteT;
@@ -501,13 +561,13 @@ export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Tick
   const map = new Map<string, Ticket>();
 
   for (const t of remoteTickets) {
-    map.set(t.id, { ...t, messages: [...(t.messages || [])] });
+    map.set(t.id, { ...t, messages: [...(t.messages || [])], events: [...(t.events || [])] });
   }
 
   for (const localT of localTickets) {
     const remoteT = map.get(localT.id);
     if (!remoteT) {
-      map.set(localT.id, { ...localT, messages: [...(localT.messages || [])] });
+      map.set(localT.id, { ...localT, messages: [...(localT.messages || [])], events: [...(localT.events || [])] });
     } else {
       // P0-04: Deduplicação e preservação estrita de mensagens concorrentes
       const mergedMessagesMap = new Map<string, any>();
@@ -524,8 +584,22 @@ export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Tick
         (a.createdAt || '').localeCompare(b.createdAt || '')
       );
 
-      // P0 Quarta Auditoria: Reconciliação causal de eventos para preservar reaberturas e integridade de status
-      const lifecycle = reconcileTicketLifecycle(localT, remoteT, mergedMessages);
+      // P0-01 (Quinta Auditoria): Mesclar e preservar 100% dos eventos estruturados de governança
+      const mergedEventsMap = new Map<string, TicketEvent>();
+      for (const e of (remoteT.events || [])) {
+        const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+        mergedEventsMap.set(key, e);
+      }
+      for (const e of (localT.events || [])) {
+        const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+        mergedEventsMap.set(key, e);
+      }
+      const mergedEvents = Array.from(mergedEventsMap.values()).sort((a, b) =>
+        (a.timestamp || '').localeCompare(b.timestamp || '')
+      );
+
+      // Reconciliação causal baseada EXCLUSIVAMENTE em eventos estruturados autorizados
+      const lifecycle = reconcileTicketLifecycle(localT, remoteT, mergedEvents);
       const localUpdated = localT.updatedAt || '';
       const remoteUpdated = remoteT.updatedAt || '';
       const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
@@ -536,6 +610,7 @@ export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Tick
         progressPercentage: lifecycle.progressPercentage,
         reopenedAt: lifecycle.reopenedAt || baseTicket.reopenedAt,
         messages: mergedMessages,
+        events: mergedEvents,
       });
     }
   }
@@ -992,6 +1067,21 @@ export class TicketStore {
       updatedAt: new Date().toISOString(),
     };
 
+    newTicket.events = [
+      {
+        id: `evt-create-${Date.now()}`,
+        ticketId: newTicket.id,
+        type: 'ticket_created',
+        actorEmail: data.createdByEmail,
+        actorRole: 'client',
+        authorized: true,
+        progressPercentage: 0,
+        status: 'pending_approval',
+        note: data.title,
+        timestamp: new Date().toISOString(),
+      }
+    ];
+
     this.tickets.unshift(newTicket);
     this.save();
 
@@ -1012,9 +1102,13 @@ export class TicketStore {
     contextData?: Ticket['contextData'];
     attachments?: Attachment[];
     clientTicketCount?: number;
-  }): Promise<Ticket> {
+  }): Promise<Ticket | undefined> {
     const newTicket = this.createTicket(data);
-    await this.saveAsync();
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] createTicketAsync falhou ao persistir remotamente: ${saveRes.error}`);
+      return undefined;
+    }
     return newTicket;
   }
 
@@ -1074,6 +1168,20 @@ export class TicketStore {
       createdAt: new Date().toISOString(),
     });
 
+    ticket.events = ticket.events || [];
+    ticket.events.push({
+      id: `evt-appr-${Date.now()}`,
+      ticketId: ticket.id,
+      type: 'master_approved',
+      actorEmail: 'master.superadmin@helpusbr.com',
+      actorRole: 'master_superadmin',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'in_production',
+      note: `Aprovação concedida pelo Administrador HelpUS (${agentName}). Autorizando envio para produção...`,
+      timestamp: new Date().toISOString(),
+    });
+
     // Save intermediate status "in_production" immediately to persistent storage
     this.save();
 
@@ -1096,6 +1204,10 @@ export class TicketStore {
     let cloudSaveResult;
     if (ticket) {
       cloudSaveResult = await this.saveAsync();
+      if (!cloudSaveResult.success) {
+        console.error(`[STORE CRITICAL] startTicketProductionAsync falhou ao persistir remotamente: ${cloudSaveResult.error}`);
+        return { ticket: undefined, cloudSaveResult };
+      }
     }
     return { ticket, cloudSaveResult };
   }
@@ -1124,6 +1236,20 @@ export class TicketStore {
         isInternalNote: false,
         content: workerResult.solutionMessage,
         createdAt: new Date().toISOString(),
+      });
+
+      ticket.events = ticket.events || [];
+      ticket.events.push({
+        id: `evt-res-${Date.now()}`,
+        ticketId: ticket.id,
+        type: 'ticket_resolved',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 100,
+        status: 'resolved',
+        note: workerResult.solutionMessage,
+        timestamp: new Date().toISOString(),
       });
 
       this.save();
@@ -1182,7 +1308,25 @@ export class TicketStore {
       });
     }
 
-    await this.saveAsync();
+    ticket.events = ticket.events || [];
+    ticket.events.push({
+      id: `evt-prg-${Date.now()}-${percentage}`,
+      ticketId: ticket.id,
+      type: 'production_step',
+      actorEmail: 'ci.cd@helpusbr.com',
+      actorRole: 'system_pipeline',
+      authorized: true,
+      progressPercentage: ticket.progressPercentage,
+      status: ticket.status,
+      note: stepMessage,
+      timestamp: new Date().toISOString(),
+    });
+
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] updateTicketProgress falhou ao persistir remotamente: ${saveRes.error}`);
+      return undefined;
+    }
     return ticket;
   }
 
@@ -1217,7 +1361,27 @@ export class TicketStore {
       createdAt: new Date().toISOString()
     });
 
-    await this.saveAsync();
+    // P0-01 (Quinta Auditoria): Evento estruturado imutável de reset/reabertura pelo Master
+    ticket.events = ticket.events || [];
+    ticket.events.push({
+      id: `evt-reset-${Date.now()}`,
+      ticketId: ticket.id,
+      type: 'ticket_reset_by_master',
+      actorEmail: 'master.superadmin@helpusbr.com',
+      actorRole: 'master_superadmin',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'pending_approval',
+      note: "Chamado retornado para 'pending_approval' pelo Master SuperAdmin.",
+      timestamp: new Date().toISOString()
+    });
+
+    // P0-02: Checagem obrigatória do resultado da persistência
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] resetTicket falhou ao persistir remotamente: ${saveRes.error}`);
+      return undefined;
+    }
     return ticket;
   }
 
@@ -1259,6 +1423,20 @@ export class TicketStore {
       isInternalNote: false,
       content: rejectMessageContent,
       createdAt: new Date().toISOString(),
+    });
+
+    ticket.events = ticket.events || [];
+    ticket.events.push({
+      id: `evt-rej-${Date.now()}`,
+      ticketId: ticket.id,
+      type: 'ticket_rejected',
+      actorEmail: 'master.superadmin@helpusbr.com',
+      actorRole: 'master_superadmin',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'rejected',
+      note: rejectionReason,
+      timestamp: new Date().toISOString(),
     });
 
     this.save();
@@ -1430,7 +1608,11 @@ export class TicketStore {
   ): Promise<Ticket | undefined> {
     const ticket = this.completeTicketProduction(ticketId, workerResult);
     if (ticket) {
-      await this.saveAsync();
+      const saveRes = await this.saveAsync();
+      if (!saveRes.success) {
+        console.error(`[STORE CRITICAL] completeTicketProductionAsync falhou ao persistir remotamente: ${saveRes.error}`);
+        return undefined;
+      }
     }
     return ticket;
   }
@@ -1443,7 +1625,11 @@ export class TicketStore {
   ): Promise<Ticket | undefined> {
     const ticket = this.rejectTicket(ticketId, rejectionReason, agentName, fallbackTicket);
     if (ticket) {
-      await this.saveAsync();
+      const saveRes = await this.saveAsync();
+      if (!saveRes.success) {
+        console.error(`[STORE CRITICAL] rejectTicketAsync falhou ao persistir remotamente: ${saveRes.error}`);
+        return undefined;
+      }
     }
     return ticket;
   }
@@ -1552,7 +1738,27 @@ export class TicketStore {
       createdAt: new Date().toISOString(),
     });
 
-    await this.saveAsync();
+    // P0-01 (Quinta Auditoria): Evento estruturado imutável de reabertura pelo Cliente
+    ticket.events = ticket.events || [];
+    ticket.events.push({
+      id: `evt-reopen-${Date.now()}`,
+      ticketId: ticket.id,
+      type: 'ticket_reopened_by_client',
+      actorEmail: ticket.createdByEmail,
+      actorRole: 'client',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'pending_approval',
+      note: reason,
+      timestamp: new Date().toISOString()
+    });
+
+    // P0-02: Checagem obrigatória do resultado da persistência
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] reopenTicketAsync falhou ao persistir remotamente: ${saveRes.error}`);
+      return undefined;
+    }
     return ticket;
   }
 }

@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { checkDurableApprovalSource } from '../src/lib/approvalPersistence.ts';
+const id='SBX-APPROVAL-054';
+const t={id,code:id,tenantId:'sandbox',status:'pending_approval'};
+assert.equal(checkDurableApprovalSource(null,id,'sandbox').httpStatus,503);
+assert.equal(checkDurableApprovalSource([],id,'sandbox').code,'TICKET_NOT_DURABLY_REGISTERED');
+assert.equal(checkDurableApprovalSource([t],id,'other').code,'REMOTE_TENANT_MISMATCH');
+assert.equal(checkDurableApprovalSource([{...t,status:'in_production'}],id,'sandbox').code,'REMOTE_TICKET_NOT_AWAITING_APPROVAL');
+assert.equal(checkDurableApprovalSource([t],id,'sandbox').ok,true);
+const route=readFileSync(new URL('../src/app/api/tickets/[id]/route.ts',import.meta.url),'utf8');
+assert.ok(route.includes('const canonicalTickets = await fetchGitHubTickets()'));
+assert.ok(route.indexOf('checkDurableApprovalSource(canonicalTickets')<route.indexOf('await ticketStore.startTicketProductionAsync('));
+console.log('✅ Ordem 054: guarda de aprovação persistida valida com mocks offline');

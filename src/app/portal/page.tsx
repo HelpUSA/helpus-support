@@ -255,7 +255,7 @@ export default function ClientPortalPage() {
           const prevProgress = prevProgressRef.current.get(t.id);
 
           if (prevStatus && prevStatus !== t.status) {
-            const statusName = getStatusLabel(t.status);
+            const statusName = getStatusLabel(t.status, t.progressPercentage ?? 0);
             setStatusAlert(`✨ Notificação em Tempo Real: O chamado [${t.code}] foi atualizado para "${statusName}"!`);
             setTimeout(() => setStatusAlert(null), 6000);
           } else if (
@@ -831,7 +831,7 @@ export default function ClientPortalPage() {
     }
   };
 
-  const getStatusLabel = (status: TicketStatus) => {
+  const getStatusLabel = (status: TicketStatus, progress = 0) => {
     switch (status) {
       case 'pending_approval':
         return 'Aguardando Aprovação';
@@ -840,7 +840,7 @@ export default function ClientPortalPage() {
       case 'in_progress':
         return 'Em Atendimento';
       case 'in_production':
-        return 'Entrou em Produção';
+        return progress > 0 ? 'Execução em andamento' : 'Aprovado — Aguardando execução';
       case 'waiting_client':
         return 'Aguardando Você';
       case 'resolved':
@@ -852,7 +852,7 @@ export default function ClientPortalPage() {
     }
   };
 
-  const getStatusBadge = (status: TicketStatus) => {
+  const getStatusBadge = (status: TicketStatus, progress = 0) => {
     switch (status) {
       case 'pending_approval':
         return <span className="px-2.5 py-1 text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full flex items-center gap-1"><Clock className="w-3.5 h-3.5 animate-pulse" /> Aguardando Aprovação</span>;
@@ -861,7 +861,7 @@ export default function ClientPortalPage() {
       case 'in_progress':
         return <span className="px-2.5 py-1 text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full flex items-center gap-1 animate-pulse"><Sparkles className="w-3.5 h-3.5" /> Em Atendimento</span>;
       case 'in_production':
-        return <span className="px-2.5 py-1 text-xs font-bold bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded-full flex items-center gap-1 animate-pulse"><Cpu className="w-3.5 h-3.5 text-purple-400" /> Entrou em Produção</span>;
+        return <span className="px-2.5 py-1 text-xs font-bold bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded-full flex items-center gap-1 animate-pulse"><Clock className="w-3.5 h-3.5 text-purple-400" /> {progress > 0 ? "Execução em andamento" : "Aprovado — Aguardando execução"}</span>;
       case 'waiting_client':
         return <span className="px-2.5 py-1 text-xs font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-full flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Aguardando Você</span>;
       case 'resolved':
@@ -1099,7 +1099,7 @@ export default function ClientPortalPage() {
                           </span>
                         )}
                       </div>
-                      {getStatusBadge(t.status)}
+                      {getStatusBadge(t.status, t.progressPercentage ?? 0)}
                     </div>
                     <h3 className="font-bold text-xs text-slate-100 group-hover:text-indigo-300 transition-colors line-clamp-1">
                       {t.title}
@@ -1332,7 +1332,7 @@ export default function ClientPortalPage() {
                       </button>
                     </>
                   )}
-                  {getStatusBadge(selectedTicket.status)}
+                  {getStatusBadge(selectedTicket.status, selectedTicket.progressPercentage ?? 0)}
                 </div>
               </div>
 
@@ -1343,7 +1343,7 @@ export default function ClientPortalPage() {
                     <Clock className="w-3.5 h-3.5 text-indigo-400" /> Linha do Tempo do Atendimento:
                   </span>
                   <span className="text-[11px] font-mono text-indigo-300 font-semibold">
-                    {getStatusLabel(selectedTicket.status)}
+                    {getStatusLabel(selectedTicket.status, selectedTicket.progressPercentage ?? 0)}
                   </span>
                 </div>
 
@@ -1496,7 +1496,7 @@ export default function ClientPortalPage() {
                       👑 Painel de Aprovação & Gestão — HelpUS Master
                     </span>
                     <span className="text-[10px] text-purple-200 bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded font-mono font-bold">
-                      Status: {getStatusLabel(selectedTicket.status)}
+                      Status: {getStatusLabel(selectedTicket.status, selectedTicket.progressPercentage ?? 0)}
                     </span>
                   </div>
 

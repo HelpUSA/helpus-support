@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { ticketStore, INITIAL_TICKETS } from '@/lib/store';
+import { ticketStore, INITIAL_TICKETS, fetchGitHubTickets } from '@/lib/store';
+import { checkDurableApprovalSource } from '@/lib/approvalPersistence';
 import { aiAutoCodingWorker } from '@/lib/aiWorker';
 import { getAutoResolutionDetails } from '@/lib/aiResolver';
 import { validateServerApiAccess, projectTicketForUser } from '@/lib/serverAuth';
@@ -165,6 +166,16 @@ export async function PATCH(
         return NextResponse.json(
           { success: false, error: 'Aprovação negada: Apenas o Administrador Master HelpUS autenticado pode autorizar chamados.' },
           { status: 403, headers: ANTI_CACHE_HEADERS }
+        );
+      }
+
+      // Prevent false Master approvals on seeded/client-cached tickets absent from shared storage.
+      const canonicalTickets = await fetchGitHubTickets();
+      const durableCheck = checkDurableApprovalSource(canonicalTickets, id, existingTicket.tenantId);
+      if (!durableCheck.ok) {
+        return NextResponse.json(
+          { success: false, code: durableCheck.code, error: durableCheck.message, executionDispatched: false },
+          { status: durableCheck.httpStatus, headers: ANTI_CACHE_HEADERS }
         );
       }
 

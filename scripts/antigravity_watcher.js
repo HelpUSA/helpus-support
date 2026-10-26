@@ -259,6 +259,359 @@ const GITHUB_TOKEN = process.env.SERVICE_WORKER_GITHUB_TOKEN || process.env.GITH
 const DB_REPO = process.env.HELPUS_DB_REPO || "HelpUSA/publicarte";
 const DB_PATH = process.env.HELPUS_DB_PATH || "data/helpus_tickets.json";
 
+// ============================================================================
+// ORDEM 050: GOVERNANÇA DE CONSUMO LOCAL-FIRST, KILL-SWITCH E CONTADOR DIÁRIO
+// ============================================================================
+
+const DEFAULT_PAUSE_FILE = path.resolve(__dirname, '..', '.worker_paused');
+const DEFAULT_BUDGET_FILE = path.resolve(__dirname, '..', '.helpus_daily_external_budget.json');
+
+/**
+ * Ordem 050: Resolução do caminho do arquivo de pausa (kill-switch)
+ */
+function resolvePauseFilePath(deps = {}, options = {}) {
+  return (
+    options.pauseFilePath ||
+    deps.pauseFilePath ||
+    (typeof process !== 'undefined' && process.env.WORKER_PAUSE_FILE) ||
+    DEFAULT_PAUSE_FILE
+  );
+}
+
+/**
+ * Ordem 050: Verificação de Kill-Switch persistente (.worker_paused).
+ * Fail-Closed: se houver erro ao acessar o arquivo (ex: EPERM, EACCES), assume pausado por segurança.
+ */
+function isWorkerPaused(deps = {}, options = {}) {
+  if (options.isPaused !== undefined) {
+    return { paused: Boolean(options.isPaused), reason: 'explicit_option' };
+  }
+  if (deps.isPaused !== undefined) {
+    return { paused: Boolean(deps.isPaused), reason: 'explicit_dep' };
+  }
+
+  const env = deps.env || process.env;
+  const envPaused = (env.HELPUS_WORKER_PAUSED || '').trim().toLowerCase();
+  if (envPaused === '1' || envPaused === 'true' || envPaused === 'yes') {
+    return { paused: true, reason: 'env_var', envVar: 'HELPUS_WORKER_PAUSED' };
+  }
+
+  const pauseFile = resolvePauseFilePath(deps, options);
+  const fsModule = deps.fs || fs;
+
+  try {
+    if (fsModule.existsSync(pauseFile)) {
+      let note = '';
+      try {
+        note = fsModule.readFileSync(pauseFile, 'utf-8').trim();
+      } catch {}
+      return {
+        paused: true,
+        reason: 'pause_file_present',
+        path: pauseFile,
+        note: note || 'Kill-switch ativo via arquivo .worker_paused',
+      };
+    }
+    return { paused: false, reason: 'unpaused', path: pauseFile };
+  } catch (err) {
+    console.warn(`[WORKER PAUSE FAIL_CLOSED] Erro ao ler estado do kill-switch (${err.message}). Aplicando fail-closed.`);
+    return {
+      paused: true,
+      reason: 'fail_closed_read_error',
+      error: err.message,
+      failClosed: true,
+      path: pauseFile,
+    };
+  }
+}
+
+/**
+ * Ordem 050: Ativação ou desativação segura do kill-switch para o operador
+ */
+function setWorkerPaused(paused = true, note = '', deps = {}, options = {}) {
+  const pauseFile = resolvePauseFilePath(deps, options);
+  const fsModule = deps.fs || fs;
+
+  try {
+    if (paused) {
+      const content = note || `Kill-switch ativado em ${new Date().toISOString()} pelo operador HelpUS.`;
+      fsModule.writeFileSync(pauseFile, content, 'utf-8');
+      return { ok: true, paused: true, path: pauseFile };
+    } else {
+      if (fsModule.existsSync(pauseFile)) {
+        fsModule.unlinkSync(pauseFile);
+      }
+      return { ok: true, paused: false, path: pauseFile };
+    }
+  } catch (err) {
+    console.error(`[WORKER PAUSE ERROR] Falha ao atualizar kill-switch (${err.message}).`);
+    return { ok: false, error: err.message, path: pauseFile };
+  }
+}
+
+/**
+ * Ordem 050: Resolução do caminho do arquivo de orçamento diário
+ */
+function resolveBudgetFilePath(deps = {}, options = {}) {
+  return (
+    options.budgetFilePath ||
+    deps.budgetFilePath ||
+    (typeof process !== 'undefined' && process.env.DAILY_BUDGET_FILE) ||
+    DEFAULT_BUDGET_FILE
+  );
+}
+
+/**
+ * Ordem 050: Leitura do contador diário local persistente de requisições externas.
+ * Teto configurável e valor inicial padrão de ZERO chamadas automáticas.
+ * Fail-Closed: se o arquivo não puder ser lido ou for corrompido, bloqueia requisições externas.
+ */
+function readDailyBudget(deps = {}, options = {}) {
+  if (deps.inMemoryBudget) {
+    return { ok: true, data: { ...deps.inMemoryBudget } };
+  }
+
+  const nowIso = deps.nowIso ? deps.nowIso() : new Date().toISOString();
+  const todayDate = nowIso.slice(0, 10);
+  const env = deps.env || process.env;
+
+  const defaultAutoLimit = Number(options.autoLimit ?? deps.autoLimit ?? env.DAILY_EXTERNAL_REQ_LIMIT_AUTO ?? 0);
+  const defaultManualLimit = Number(options.manualLimit ?? deps.manualLimit ?? env.DAILY_EXTERNAL_REQ_LIMIT_MANUAL ?? 50);
+
+  const budgetFile = resolveBudgetFilePath(deps, options);
+  const fsModule = deps.fs || fs;
+
+  try {
+    if (!fsModule.existsSync(budgetFile)) {
+      const initialRecord = {
+        date: todayDate,
+        autoRequests: 0,
+        manualRequests: 0,
+        totalRequests: 0,
+        autoLimit: defaultAutoLimit,
+        manualLimit: defaultManualLimit,
+        lastUpdatedIso: nowIso,
+        history: [],
+      };
+      return { ok: true, data: initialRecord, isNew: true };
+    }
+
+    const raw = fsModule.readFileSync(budgetFile, 'utf-8');
+    const parsed = JSON.parse(raw);
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error('Conteúdo do arquivo de orçamento não é um objeto JSON válido.');
+    }
+
+    if (parsed.date !== todayDate) {
+      const rolloverRecord = {
+        date: todayDate,
+        autoRequests: 0,
+        manualRequests: 0,
+        totalRequests: 0,
+        autoLimit: defaultAutoLimit,
+        manualLimit: defaultManualLimit,
+        lastUpdatedIso: nowIso,
+        history: [
+          ...(Array.isArray(parsed.history) ? parsed.history.slice(-10) : []),
+          {
+            date: parsed.date,
+            autoRequests: parsed.autoRequests || 0,
+            manualRequests: parsed.manualRequests || 0,
+            totalRequests: parsed.totalRequests || 0,
+          },
+        ],
+      };
+      return { ok: true, data: rolloverRecord, rolledOver: true };
+    }
+
+    parsed.autoLimit = Number(options.autoLimit ?? deps.autoLimit ?? env.DAILY_EXTERNAL_REQ_LIMIT_AUTO ?? parsed.autoLimit ?? 0);
+    parsed.manualLimit = Number(options.manualLimit ?? deps.manualLimit ?? env.DAILY_EXTERNAL_REQ_LIMIT_MANUAL ?? parsed.manualLimit ?? 50);
+
+    return { ok: true, data: parsed };
+  } catch (err) {
+    console.warn(`[BUDGET STORE FAIL_CLOSED] Erro ao ler/parsear arquivo de orçamento diário (${err.message}). Bloqueando requisições externas.`);
+    return {
+      ok: false,
+      error: err.message,
+      failClosed: true,
+      reason: 'corrupted_or_inaccessible_budget_store',
+    };
+  }
+}
+
+/**
+ * Ordem 050: Gravação atômica do registro de orçamento diário com rotação segura
+ */
+function atomicSaveDailyBudget(record, deps = {}, options = {}) {
+  if (deps.failBudgetSave) {
+    return { ok: false, error: 'simulated_save_failure' };
+  }
+  if (deps.inMemoryBudget) {
+    deps.inMemoryBudget = { ...record };
+    return { ok: true };
+  }
+
+  const budgetFile = resolveBudgetFilePath(deps, options);
+  const fsModule = deps.fs || fs;
+  const tmpFile = `${budgetFile}.tmp.${process.pid}.${Date.now()}`;
+
+  try {
+    const payload = JSON.stringify(record, null, 2);
+    fsModule.writeFileSync(tmpFile, payload, 'utf-8');
+    fsModule.renameSync(tmpFile, budgetFile);
+    return { ok: true };
+  } catch (err) {
+    try {
+      if (fsModule.existsSync(tmpFile)) fsModule.unlinkSync(tmpFile);
+    } catch {}
+    console.error(`[BUDGET SAVE ERROR] Falha ao persistir orçamento diário (${err.message}).`);
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Ordem 050: Contabilização e reserva de requisições externas ANTES do envio.
+ * Previne estouro de cotas sob concorrência e assegura valor inicial de ZERO chamadas automáticas.
+ * Diferencia 'manual' vs 'auto' com fail-closed estrito.
+ */
+function reserveExternalRequest(kind = 'auto', deps = {}, options = {}) {
+  const pauseCheck = isWorkerPaused(deps, options);
+  if (pauseCheck.paused) {
+    return {
+      allowed: false,
+      reason: 'worker_paused',
+      message: `Requisição externa bloqueada por kill-switch ativo (${pauseCheck.reason}).`,
+      failClosed: true,
+    };
+  }
+
+  // Se fetch for um mock injetado em teste e nenhum arquivo/memória de orçamento foi especificado,
+  // permite a execução do mock sem poluir ou esgotar o orçamento em disco do host.
+  const isMockWithoutBudget = Boolean(
+    deps.fetch &&
+    deps.fetch !== globalThis.fetch &&
+    !options.budgetFilePath &&
+    !deps.budgetFilePath &&
+    !deps.inMemoryBudget &&
+    !options.enforceBudgetInMock &&
+    !deps.enforceBudgetInMock
+  );
+
+  if (isMockWithoutBudget) {
+    return {
+      allowed: true,
+      kind: kind === 'manual' ? 'manual' : 'auto',
+      currentCount: 0,
+      limit: 9999,
+      totalRequests: 0,
+      reservationId: `mock-${Date.now()}`,
+      isMock: true,
+    };
+  }
+
+  const budgetRead = readDailyBudget(deps, options);
+  if (!budgetRead.ok) {
+    return {
+      allowed: false,
+      reason: budgetRead.reason || 'budget_read_failed',
+      error: budgetRead.error,
+      failClosed: true,
+    };
+  }
+
+  const record = budgetRead.data;
+  const requestedKind = kind === 'manual' ? 'manual' : 'auto';
+
+  if (requestedKind === 'auto') {
+    if (record.autoRequests + 1 > record.autoLimit) {
+      return {
+        allowed: false,
+        reason: 'daily_auto_limit_exceeded',
+        kind: 'auto',
+        currentCount: record.autoRequests,
+        limit: record.autoLimit,
+        message: `Limite diário de requisições automáticas atingido (${record.autoRequests}/${record.autoLimit}). Operações automáticas bloqueadas.`,
+      };
+    }
+  } else {
+    if (record.manualRequests + 1 > record.manualLimit) {
+      return {
+        allowed: false,
+        reason: 'daily_manual_limit_exceeded',
+        kind: 'manual',
+        currentCount: record.manualRequests,
+        limit: record.manualLimit,
+        message: `Limite diário de requisições manuais atingido (${record.manualRequests}/${record.manualLimit}). Operação manual bloqueada.`,
+      };
+    }
+  }
+
+  if (requestedKind === 'auto') {
+    record.autoRequests += 1;
+  } else {
+    record.manualRequests += 1;
+  }
+  record.totalRequests = (record.autoRequests || 0) + (record.manualRequests || 0);
+  record.lastUpdatedIso = deps.nowIso ? deps.nowIso() : new Date().toISOString();
+
+  const saveRes = atomicSaveDailyBudget(record, deps, options);
+  if (!saveRes.ok) {
+    return {
+      allowed: false,
+      reason: 'budget_save_failed',
+      error: saveRes.error,
+      failClosed: true,
+      message: 'Falha ao persistir reserva de cota em disco. Requisição bloqueada por fail-closed.',
+    };
+  }
+
+  return {
+    allowed: true,
+    kind: requestedKind,
+    currentCount: requestedKind === 'auto' ? record.autoRequests : record.manualRequests,
+    limit: requestedKind === 'auto' ? record.autoLimit : record.manualLimit,
+    totalRequests: record.totalRequests,
+    reservationId: `${requestedKind}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+  };
+}
+
+/**
+ * Ordem 050: Retorna o status consolidado de governança de consumo e kill-switch
+ */
+function getDailyBudgetStatus(deps = {}, options = {}) {
+  const pauseCheck = isWorkerPaused(deps, options);
+  const budgetRead = readDailyBudget(deps, options);
+
+  return {
+    pauseState: pauseCheck,
+    budgetState: budgetRead.ok ? budgetRead.data : null,
+    budgetError: budgetRead.ok ? null : budgetRead.error,
+  };
+}
+
+/**
+ * Ordem 050: Reset administrativo do contador diário (para uso em testes ou manutenção)
+ */
+function resetDailyBudget(deps = {}, options = {}) {
+  const nowIso = deps.nowIso ? deps.nowIso() : new Date().toISOString();
+  const todayDate = nowIso.slice(0, 10);
+  const env = deps.env || process.env;
+
+  const resetRecord = {
+    date: todayDate,
+    autoRequests: 0,
+    manualRequests: 0,
+    totalRequests: 0,
+    autoLimit: Number(options.autoLimit ?? deps.autoLimit ?? env.DAILY_EXTERNAL_REQ_LIMIT_AUTO ?? 0),
+    manualLimit: Number(options.manualLimit ?? deps.manualLimit ?? env.DAILY_EXTERNAL_REQ_LIMIT_MANUAL ?? 50),
+    lastUpdatedIso: nowIso,
+    history: [],
+  };
+
+  return atomicSaveDailyBudget(resetRecord, deps, options);
+}
+
 // P1-01: Mapa completo de tenants suportados oficialmente pela plataforma HelpUS
 const TENANTS = {
   brayyan: {
@@ -530,6 +883,14 @@ async function fetchTickets(deps = {}, options = {}) {
     return null;
   }
 
+  // 3. Ordem 050: Governança de consumo, verificação de kill-switch e reserva de cota diária
+  const reqKind = options.kind || (options.isManual || deps.isManual ? 'manual' : (options.isContinuous || deps.isContinuous || options.isAuto || deps.isAuto ? 'auto' : 'manual'));
+  const reservation = reserveExternalRequest(reqKind, deps, options);
+  if (!reservation.allowed) {
+    console.warn(`[WATCHDOG GOVERNANCE] Requisição fetchTickets cancelada (${reservation.reason}). Limite: ${reservation.limit}, Atual: ${reservation.currentCount || 0}.`);
+    return null;
+  }
+
   let hasError = false;
 
   // 3. Consulta Contents API no GitHub com parsing seguro e logs de auditoria
@@ -633,6 +994,14 @@ async function saveTickets(tickets, maxRetries = 3, deps = {}, options = {}) {
     return false;
   }
 
+  // Ordem 050: Governança de consumo, verificação de kill-switch e reserva de cota diária
+  const reqKind = options.kind || (options.isManual || deps.isManual ? 'manual' : (options.isContinuous || deps.isContinuous || options.isAuto || deps.isAuto ? 'auto' : 'manual'));
+  const reservation = reserveExternalRequest(reqKind, deps, options);
+  if (!reservation.allowed) {
+    console.warn(`[WATCHDOG GOVERNANCE] Salvamento saveTickets cancelado (${reservation.reason}). Limite: ${reservation.limit}, Atual: ${reservation.currentCount || 0}.`);
+    return false;
+  }
+
   let attempt = 0;
   let currentTickets = [...tickets];
 
@@ -718,6 +1087,13 @@ async function verifyCommit(tenant, commitSha, deps = {}, options = {}) {
   // P0-A: Rejeitar qualquer comprovação fictícia ou offline. Consulta remota obrigatória.
   if (!token) {
     return { valid: false, reason: 'unverified_commit_remote_check_required_no_token' };
+  }
+
+  // Ordem 050: Governança de consumo, verificação de kill-switch e reserva de cota diária
+  const reqKind = options.kind || (options.isManual || deps.isManual ? 'manual' : (options.isContinuous || deps.isContinuous || options.isAuto || deps.isAuto ? 'auto' : 'manual'));
+  const reservation = reserveExternalRequest(reqKind, deps, options);
+  if (!reservation.allowed) {
+    return { valid: false, reason: reservation.reason };
   }
 
   try {
@@ -1347,6 +1723,13 @@ function releaseLease(ticketId) {
 }
 
 async function runWatchdogCycle(options = {}) {
+  // Ordem 050: Verificação de kill-switch antes de iniciar o ciclo
+  const pauseCheck = isWorkerPaused(options.deps, options);
+  if (pauseCheck.paused) {
+    console.log(`[WATCHDOG] Ciclo pausado por kill-switch (${pauseCheck.reason}). Nenhuma tarefa iniciada.`);
+    return { success: true, processedCount: 0, reason: 'worker_paused', paused: true };
+  }
+
   // 1. Recuperação proativa de jobs abandonados / órfãos após restart ou crash
   recoverOrphanedClaims(Date.now(), { deps: options.deps });
 
@@ -1431,6 +1814,13 @@ async function runContinuousWorker(options = {}) {
   while (isRunning) {
     const cycleStart = Date.now();
     try {
+      const pauseCheck = isWorkerPaused(options.deps, options);
+      if (pauseCheck.paused) {
+        console.warn(`[WORKER] Worker em pausa por kill-switch (${pauseCheck.reason}). Nenhuma requisição externa permitida. Aguardando...`);
+        await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, 10000)));
+        continue;
+      }
+
       if (isRateLimitBackoffActive(cycleStart)) {
         const waitMs = rateLimitState.backoffUntilMs - cycleStart;
         console.warn("[WORKER] Ciclo pausado por rate limit backoff. Aguardando " + Math.round(waitMs / 1000) + "s...");
@@ -1459,6 +1849,21 @@ async function verifyServiceConnection(deps = {}, options = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
   const now = typeof deps.now === 'function' ? deps.now() : (deps.now || Date.now());
 
+  // Ordem 050: Verificação prévia de Kill-Switch
+  const pauseCheck = isWorkerPaused(deps, options);
+  if (pauseCheck.paused) {
+    return {
+      ok: false,
+      authenticated: false,
+      status: 503,
+      reason: 'worker_paused',
+      message: 'Teste de conexão bloqueado: kill-switch ativo (.worker_paused).',
+      tokenMetadata: inspectTokenMetadata(null),
+      isReadOnlyVerified: true,
+      dataMutated: false,
+    };
+  }
+
   const token = resolveServiceWorkerToken(deps, options);
   if (!token) {
     return {
@@ -1474,6 +1879,25 @@ async function verifyServiceConnection(deps = {}, options = {}) {
   }
 
   const tokenMeta = inspectTokenMetadata(token);
+
+  // Ordem 050: Sonda de teste de conexão é classificada como operação 'manual'
+  const reservation = reserveExternalRequest('manual', deps, options);
+  if (!reservation.allowed) {
+    return {
+      ok: false,
+      authenticated: false,
+      status: 429,
+      reason: reservation.reason,
+      message: `Teste de conexão bloqueado por governança de orçamento (${reservation.reason}).`,
+      tokenMetadata: tokenMeta,
+      rateLimit: null,
+      detectedScopes: [],
+      targetRepo: DB_REPO,
+      targetPath: DB_PATH,
+      isReadOnlyVerified: true,
+      dataMutated: false,
+    };
+  }
 
   try {
     const headers = await getGitHubHeaders(deps, options);
@@ -1623,30 +2047,65 @@ module.exports = {
   isRateLimitBackoffActive,
   updateRateLimitFromResponse,
   verifyServiceConnection,
+  isWorkerPaused,
+  setWorkerPaused,
+  resolvePauseFilePath,
+  resolveBudgetFilePath,
+  readDailyBudget,
+  atomicSaveDailyBudget,
+  reserveExternalRequest,
+  getDailyBudgetStatus,
+  resetDailyBudget,
 };
 
 if (require.main === module) {
   const args = process.argv.slice(2);
-  const isTestConn = args.includes('--test-connection') || args.includes('-t') || process.env.WORKER_MODE === 'test_connection';
-  if (isTestConn) {
-    verifyServiceConnection()
-      .then((report) => {
-        console.log('=======================================================');
-        console.log('  HelpUS Watcher — Teste de Conexao Autenticada (R/O)  ');
-        console.log('=======================================================');
-        console.log(JSON.stringify(report, null, 2));
-        process.exit(report.ok ? 0 : 1);
-      })
-      .catch((err) => {
-        console.error('[CONNECTION TEST FATAL]:', err.message);
-        process.exit(1);
-      });
+  const isPause = args.includes('--pause') || args.includes('-p');
+  const isResume = args.includes('--resume') || args.includes('-r');
+  const isStatus = args.includes('--status') || args.includes('-s');
+  const isResetBudget = args.includes('--reset-budget');
+
+  if (isPause) {
+    const res = setWorkerPaused(true, 'Kill-switch ativado manualmente via linha de comando');
+    console.log(JSON.stringify(res, null, 2));
+    process.exit(res.ok ? 0 : 1);
+  } else if (isResume) {
+    const res = setWorkerPaused(false);
+    console.log(JSON.stringify(res, null, 2));
+    process.exit(res.ok ? 0 : 1);
+  } else if (isStatus) {
+    const status = getDailyBudgetStatus();
+    console.log('=======================================================');
+    console.log('  HelpUS Watcher — Status de Governanca Local-First   ');
+    console.log('=======================================================');
+    console.log(JSON.stringify(status, null, 2));
+    process.exit(0);
+  } else if (isResetBudget) {
+    const res = resetDailyBudget();
+    console.log(JSON.stringify(res, null, 2));
+    process.exit(res.ok ? 0 : 1);
   } else {
-    const isContinuous = args.includes('--mode=continuous') || args.includes('-c') || process.env.WORKER_MODE === 'continuous';
-    if (isContinuous) {
-      runContinuousWorker().catch((err) => console.error('[UNIFIED WORKER FATAL]:', err));
+    const isTestConn = args.includes('--test-connection') || args.includes('-t') || process.env.WORKER_MODE === 'test_connection';
+    if (isTestConn) {
+      verifyServiceConnection()
+        .then((report) => {
+          console.log('=======================================================');
+          console.log('  HelpUS Watcher — Teste de Conexao Autenticada (R/O)  ');
+          console.log('=======================================================');
+          console.log(JSON.stringify(report, null, 2));
+          process.exit(report.ok ? 0 : 1);
+        })
+        .catch((err) => {
+          console.error('[CONNECTION TEST FATAL]:', err.message);
+          process.exit(1);
+        });
     } else {
-      runWatchdog().catch((err) => console.error('[WATCHDOG ERROR]:', err));
+      const isContinuous = args.includes('--mode=continuous') || args.includes('-c') || process.env.WORKER_MODE === 'continuous';
+      if (isContinuous) {
+        runContinuousWorker().catch((err) => console.error('[UNIFIED WORKER FATAL]:', err));
+      } else {
+        runWatchdog().catch((err) => console.error('[WATCHDOG ERROR]:', err));
+      }
     }
   }
 }

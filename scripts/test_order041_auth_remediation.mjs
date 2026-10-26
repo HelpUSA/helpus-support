@@ -183,6 +183,7 @@ console.log('✅ PASS: Ordem 041 - Recuperação automática e reset de backoff 
 // 7. TESTE DE CONTROLE ADAPTATIVO DE INTERVALO DE POLLING
 // --------------------------------------------------------------------
 process.env.WATCHER_POLL_INTERVAL_MS = '20000';
+process.env.DAILY_EXTERNAL_REQ_LIMIT_AUTO = '50';
 let workerCycleRan = false;
 const workerPromise = runContinuousWorker({
   pollIntervalMs: 5, // ciclo ultrarrápido para teste

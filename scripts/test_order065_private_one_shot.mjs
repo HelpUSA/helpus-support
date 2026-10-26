@@ -27,7 +27,7 @@ let calls=0,reservations=0,dispatched=0,acked=false;
 let source=[ticket];
 const runGh=(bin,args,options)=>{
  calls++;
- assert.equal(bin,'gh');assert.equal(args[2],STAGING_ENDPOINT);
+ assert.equal(bin,'gh');assert.equal(args[2],'GET');assert.equal(args[3],STAGING_ENDPOINT);
  assert.equal(options.shell,false);
  return JSON.stringify({encoding:'base64',content:Buffer.from(JSON.stringify(source)).toString('base64')});
 };

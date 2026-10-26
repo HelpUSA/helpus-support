@@ -2101,11 +2101,19 @@ if (require.main === module) {
     const id = args.find(a => a.startsWith('--dispatch-approved-sbx=')).slice('--dispatch-approved-sbx='.length);
     const { dispatchSandboxApprovedOnDemand } = require('./approval_outbox.js');
     const { dispatchSandboxTicket } = require('./sandbox_dispatch.js');
+    const { fetchSandboxTicketsFromGitHub } = require('./staging_sbx_reader.js');
     const paused = isWorkerPaused().paused;
     const confirmed = args.includes('--send-local');
     dispatchSandboxApprovedOnDemand(id, {
       paused, confirmed, allowedTenantIds: ['sandbox'],
-      fetchTickets: () => fetchTickets({}, {isManual:true}),
+      // Strict staging isolation: never query HelpUSA/publicarte in SBX dispatch.
+      fetchTickets: async () => {
+        const read = await fetchSandboxTicketsFromGitHub({
+          paused,confirmed:true,
+          reserve: (kind) => reserveExternalRequest(kind)
+        });
+        return read.ok ? read.tickets : null;
+      },
       verifyEvent: verifyTicketEventIntegrity,
       dispatch: dispatchSandboxTicket,
     }).then(result => {

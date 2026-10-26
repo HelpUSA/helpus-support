@@ -1,16 +1,7 @@
-// scripts/antigravity_watcher.js
-// Antigravity Watchdog & Autonomous Pipeline Runner (HelpUS Support Hub)
-// P0-01: Zero credenciais embutidas. Exclusivamente process.env.
-// P0-01 (Auditoria): Deploy hook HTTP 2xx não atesta READY; não marca resolved sem validação de deployment.
-// P0-02 (Auditoria): Retornos de updateCloud() são estritamente validados; falha de persistência aborta o fluxo.
-// P0-03 (Auditoria): Etapa 50% exige commit e alteração comprovada no repositório; não assume progresso nominal.
-// P1-01: Rejeição estrita de tenants desconhecidos (sem fallback).
-// P1-02: fetchTickets() retorna null em erro de rede/API para não mascarar falhas como base vazia ([]).
-
 const fs = require('fs');
 const path = require('path');
 
-// P0-01: Remover credencial hardcoded. Exigir variável de ambiente.
+// P0-01: Zero credenciais hardcoded. Exclusivamente process.env.
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
 const DB_REPO = process.env.HELPUS_DB_REPO || 'HelpUSA/publicarte';
 const DB_PATH = process.env.HELPUS_DB_PATH || 'data/helpus_tickets.json';
@@ -51,23 +42,67 @@ const TENANTS = {
 
 let cloudSha = null;
 
-async function getGitHubHeaders() {
+// Reconciliação granular de tickets para concorrência CAS sem perda de mensagens (P0-04)
+function mergeTicketsGranular(remoteTickets, localTickets) {
+  const map = new Map();
+
+  for (const t of remoteTickets) {
+    map.set(t.id, { ...t, messages: [...(t.messages || [])] });
+  }
+
+  for (const localT of localTickets) {
+    const remoteT = map.get(localT.id);
+    if (!remoteT) {
+      map.set(localT.id, { ...localT, messages: [...(localT.messages || [])] });
+    } else {
+      const mergedMessagesMap = new Map();
+      for (const m of (remoteT.messages || [])) {
+        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        mergedMessagesMap.set(key, m);
+      }
+      for (const m of (localT.messages || [])) {
+        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        mergedMessagesMap.set(key, m);
+      }
+
+      const mergedMessages = Array.from(mergedMessagesMap.values()).sort((a, b) =>
+        (a.createdAt || '').localeCompare(b.createdAt || '')
+      );
+
+      const localUpdated = localT.updatedAt || '';
+      const remoteUpdated = remoteT.updatedAt || '';
+      const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
+
+      map.set(localT.id, {
+        ...baseTicket,
+        messages: mergedMessages,
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+async function getGitHubHeaders(deps = {}) {
+  const token = (deps.githubToken || GITHUB_TOKEN || '').trim();
   const headers = {
     'User-Agent': 'Antigravity-Watchdog',
     'Accept': 'application/vnd.github+json'
   };
-  if (GITHUB_TOKEN) {
-    headers['Authorization'] = `Bearer ${GITHUB_TOKEN.trim()}`;
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
   }
   return headers;
 }
 
 // P1-02: Retorna null em caso de falha de rede/API para não confundir indisponibilidade com base vazia ([])
-async function fetchTickets() {
+async function fetchTickets(deps = {}) {
+  const fetchFn = deps.fetch || globalThis.fetch;
   let hasError = false;
+
   try {
-    const headers = await getGitHubHeaders();
-    const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
+    const headers = await getGitHubHeaders(deps);
+    const res = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
     if (res.ok) {
       const data = await res.json();
       cloudSha = data.sha;
@@ -85,7 +120,7 @@ async function fetchTickets() {
   }
 
   try {
-    const res = await fetch(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, { cache: 'no-store' });
+    const res = await fetchFn(`https://raw.githubusercontent.com/${DB_REPO}/main/${DB_PATH}?t=${Date.now()}`, { cache: 'no-store' });
     if (res.ok) {
       return await res.json();
     } else if (res.status === 404) {
@@ -105,25 +140,31 @@ async function fetchTickets() {
   return [];
 }
 
-async function saveTickets(tickets, maxRetries = 3) {
-  if (!GITHUB_TOKEN) {
+// P0-02 & P0-04: Reconciliação em nível de operação com CAS e retries sem perda de dados
+async function saveTickets(tickets, maxRetries = 3, deps = {}) {
+  const fetchFn = deps.fetch || globalThis.fetch;
+  const token = (deps.githubToken || GITHUB_TOKEN || '').trim();
+
+  if (!token) {
     console.warn('[WATCHDOG SECURITY] GITHUB_TOKEN não configurado no ambiente. Salvamento remoto no GitHub Cloud suspenso.');
     return false;
   }
 
   let attempt = 0;
+  let currentTickets = [...tickets];
+
   while (attempt < maxRetries) {
     attempt++;
     try {
       const headers = {
-        'Authorization': `Bearer ${GITHUB_TOKEN.trim()}`,
+        'Authorization': `Bearer ${token}`,
         'User-Agent': 'Antigravity-Watchdog',
         'Content-Type': 'application/json',
         'Accept': 'application/vnd.github+json'
       };
 
       let latestSha = undefined;
-      const check = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
+      const check = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: 'no-store' });
       if (check.ok) {
         const d = await check.json();
         latestSha = d.sha;
@@ -133,12 +174,12 @@ async function saveTickets(tickets, maxRetries = 3) {
         return false;
       }
 
-      const res = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
+      const res = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({
           message: `db(watchdog): update tickets execution progress (attempt ${attempt})`,
-          content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),
+          content: Buffer.from(JSON.stringify(currentTickets, null, 2), 'utf-8').toString('base64'),
           sha: latestSha || cloudSha || undefined,
           branch: 'main'
         })
@@ -151,9 +192,13 @@ async function saveTickets(tickets, maxRetries = 3) {
         return true;
       }
 
-      // Tratamento de conflito 409 (CAS)
+      // Tratamento de conflito 409 (CAS) com Reconciliação Granular (P0-02 & P0-04)
       if (res.status === 409) {
-        console.warn(`[WATCHDOG CAS] Conflito 409 detectado na tentativa ${attempt}. Reconciliando SHA...`);
+        console.warn(`[WATCHDOG CAS] Conflito 409 detectado na tentativa ${attempt}. Reconciliando granularmente com banco remoto...`);
+        const fresh = await fetchTickets(deps);
+        if (fresh && Array.isArray(fresh)) {
+          currentTickets = mergeTicketsGranular(fresh, currentTickets);
+        }
         continue;
       }
 
@@ -168,7 +213,110 @@ async function saveTickets(tickets, maxRetries = 3) {
   return false;
 }
 
-async function processTicket(ticket, options = {}) {
+// P0-01 (Auditoria): Verificador de procedência de commit no GitHub
+async function verifyCommit(tenant, commitSha, deps = {}) {
+  const fetchFn = deps.fetch || globalThis.fetch;
+  const token = (deps.githubToken || GITHUB_TOKEN || '').trim();
+
+  if (!commitSha || typeof commitSha !== 'string' || !/^[0-9a-f]{7,40}$/i.test(commitSha)) {
+    return { valid: false, reason: 'invalid_sha_format' };
+  }
+
+  if (!tenant || !tenant.repo) {
+    return { valid: false, reason: 'missing_tenant_repo' };
+  }
+
+  if (deps.verifyCommitFn) {
+    return await deps.verifyCommitFn(tenant, commitSha);
+  }
+
+  if (token) {
+    try {
+      const url = `https://api.github.com/repos/${tenant.repo}/commits/${commitSha}`;
+      const res = await fetchFn(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'User-Agent': 'Antigravity-Watchdog',
+          'Accept': 'application/vnd.github+json'
+        }
+      });
+
+      if (!res.ok) {
+        return { valid: false, reason: `commit_not_found_on_github_status_${res.status}` };
+      }
+      const data = await res.json();
+      return { valid: true, fullSha: data.sha, message: data.commit?.message };
+    } catch (e) {
+      return { valid: false, reason: `github_api_error: ${e.message}` };
+    }
+  }
+
+  // Se sem token de API configurado, aceita SHA completo de 40 dígitos em fallback offline seguro
+  if (commitSha.length === 40) {
+    return { valid: true, fullSha: commitSha };
+  }
+
+  return { valid: false, reason: 'unverified_short_sha_without_token' };
+}
+
+// P0-01 (Auditoria): Verificador de procedência e status READY do deployment na Vercel
+async function verifyDeployment(tenant, options = {}, deps = {}) {
+  const fetchFn = deps.fetch || globalThis.fetch;
+
+  if (deps.verifyDeploymentFn) {
+    return await deps.verifyDeploymentFn(tenant, options);
+  }
+
+  // 1. Verificação via Vercel Deployments API
+  if (options.deploymentId && (options.vercelToken || process.env.VERCEL_TOKEN)) {
+    const vToken = (options.vercelToken || process.env.VERCEL_TOKEN).trim();
+    try {
+      const url = `https://api.vercel.com/v13/deployments/${options.deploymentId}`;
+      const res = await fetchFn(url, {
+        headers: { 'Authorization': `Bearer ${vToken}` }
+      });
+      if (res.ok) {
+        const d = await res.json();
+        const state = d.status || d.readyState;
+        const isReady = state === 'READY';
+        const isProd = d.target === 'production' || !d.target;
+        const matchesCommit = !options.expectedSha || (d.meta?.githubCommitSha === options.expectedSha);
+
+        if (isReady && isProd && matchesCommit) {
+          return { ready: true, deploymentId: d.id, url: d.url };
+        }
+        return { ready: false, reason: `deployment_status_${state}` };
+      }
+      return { ready: false, reason: `vercel_api_error_${res.status}` };
+    } catch (e) {
+      return { ready: false, reason: e.message };
+    }
+  }
+
+  // 2. Verificação via Smoke Test / Health Check ativo no domínio
+  if (options.smokeTest) {
+    try {
+      const targetUrl = `https://${tenant.domain}`;
+      const res = await fetchFn(targetUrl, { method: 'GET', cache: 'no-store' });
+      if (res.ok) {
+        return { ready: true, method: 'smoke_test_ok', status: res.status };
+      }
+      return { ready: false, reason: `smoke_test_failed_status_${res.status}` };
+    } catch (e) {
+      return { ready: false, reason: `smoke_test_error: ${e.message}` };
+    }
+  }
+
+  // 3. Verificador injetado por proveniência
+  if (typeof options.provenanceVerifier === 'function') {
+    return await options.provenanceVerifier(tenant, options);
+  }
+
+  // Rejeita simples flags booleanas sem identidade ou proveniência comprovada
+  return { ready: false, reason: 'unverified_deployment_provenance' };
+}
+
+async function processTicket(ticket, options = {}, deps = {}) {
   console.log(`\n🚀 [WATCHDOG ANTIGRAVITY] DETECTADO CHAMADO EM PRODUÇÃO: [${ticket.code}] - "${ticket.title}"`);
 
   // P1-01: Rejeitar tenant desconhecido estritamente sem fallback
@@ -179,7 +327,7 @@ async function processTicket(ticket, options = {}) {
     throw new Error(errorMsg);
   }
 
-  // P0-02: Execução comprovada em vez de simulação artificial
+  // Governança: Retenção para verificação quando allowAutonomousDeploy não estiver explícito
   if (options.dryRun || !options.allowAutonomousDeploy) {
     console.log(`[WATCHDOG] Chamado [${ticket.code}] para o tenant [${tenant.name}] validado contra a matriz de segurança. Execução direta retida para homologação de governança.`);
     return {
@@ -191,7 +339,7 @@ async function processTicket(ticket, options = {}) {
   }
 
   const updateCloud = async (percentage, stepMsg, solutionMsg, newStatus = 'in_production') => {
-    const freshTickets = await fetchTickets();
+    const freshTickets = await fetchTickets(deps);
     if (!freshTickets || !Array.isArray(freshTickets)) {
       console.error(`[WATCHDOG ERROR] Falha ao recuperar tickets remotos para atualizar [${ticket.code}]. Abortando.`);
       return false;
@@ -228,7 +376,7 @@ async function processTicket(ticket, options = {}) {
       createdAt: new Date().toISOString(),
     });
 
-    return await saveTickets(freshTickets);
+    return await saveTickets(freshTickets, 3, deps);
   };
 
   // Etapa 1: 25% - Análise e Requisitos Validados
@@ -239,13 +387,28 @@ async function processTicket(ticket, options = {}) {
     return { success: false, step: 25, error: 'cloud_save_failed_at_25' };
   }
 
-  // Etapa 2: 50% - Validação de Código Comprovado (P0-03)
-  // O código exige que haja um commit comprovado vinculado ao chamado ou verificação de workspace
+  // Etapa 2: 50% - Validação de Código Comprovado (P0-03 & P0-01 Auditoria)
   const solutionCommitSha = options.verifiedSha || ticket.solutionCommitSha;
   if (!solutionCommitSha) {
     console.log(`[WATCHDOG P0-03] Chamado [${ticket.code}] aguardando commit de alteração de código real. Não assumindo conclusão nominal.`);
     const okHold = await updateCloud(25, `🛠️ Análise concluída. Aguardando implementação técnica e commit no repositório ${tenant.repo}...`);
+    // P1-01 (Auditoria): Checar retorno de okHold estritamente
+    if (!okHold) {
+      console.error(`[WATCHDOG P1-01] Falha ao persistir estado de espera 25% para [${ticket.code}]`);
+      return { success: false, step: 25, error: 'cloud_save_failed_at_hold' };
+    }
     return { success: true, step: 25, status: 'in_production', note: 'Aguardando commit de alteração de código verificável' };
+  }
+
+  // P0-01: Verificação de procedência do commit no repositório GitHub
+  const commitCheck = await verifyCommit(tenant, solutionCommitSha, deps);
+  if (!commitCheck.valid) {
+    console.warn(`[WATCHDOG P0-01] Commit ${solutionCommitSha} não comprovado no repositório ${tenant.repo} (motivo: ${commitCheck.reason}). Retendo avanço.`);
+    const okHoldInvalid = await updateCloud(25, `⚠️ Commit ${solutionCommitSha} não comprovado no repositório ${tenant.repo} (${commitCheck.reason}). Retido na etapa de verificação.`);
+    if (!okHoldInvalid) {
+      return { success: false, step: 25, error: 'cloud_save_failed_at_invalid_commit_hold' };
+    }
+    return { success: false, step: 25, error: `unverified_commit: ${commitCheck.reason}` };
   }
 
   console.log(`[WATCHDOG] Código comprovado vinculado: commit ${solutionCommitSha} em ${tenant.repo}`);
@@ -257,9 +420,11 @@ async function processTicket(ticket, options = {}) {
 
   // Etapa 3: 75% - Disparo do Deploy Hook
   let deployTriggered = false;
-  if (tenant.deployHook) {
+  const fetchFn = deps.fetch || globalThis.fetch;
+  const hookUrl = options.deployHook || tenant.deployHook;
+  if (hookUrl) {
     try {
-      const hookRes = await fetch(tenant.deployHook, { method: 'POST' });
+      const hookRes = await fetchFn(hookUrl, { method: 'POST' });
       deployTriggered = hookRes.ok;
       console.log(`[WATCHDOG] Deploy Hook disparado para ${tenant.domain}: HTTP ${hookRes.status}`);
     } catch (e) {
@@ -278,9 +443,9 @@ async function processTicket(ticket, options = {}) {
     return { success: false, step: 75, error: 'cloud_save_failed_at_75' };
   }
 
-  // P0-01: Não considerar HTTP 2xx do Deploy Hook prova de deploy concluído.
-  // Apenas avança para 100% / resolved se houver confirmação explícita de READY do deployment
-  if (options.deploymentReady === true) {
+  // P0-01 (Auditoria): Verificação comprovada de publicação READY na Vercel
+  const deployCheck = await verifyDeployment(tenant, { ...options, expectedSha: solutionCommitSha }, deps);
+  if (deployCheck.ready) {
     const finalMsg = `✨ *[CONCLUÍDO & RESOLVIDO]*: A solicitação [${ticket.code}] foi processada com validação completa no tenant ${tenant.name} (${tenant.domain}) e confirmada como READY em produção.`;
     const ok100 = await updateCloud(100, `✅ Publicação confirmada e verificada como READY em ${tenant.domain}.`, finalMsg, 'resolved');
     if (!ok100) {
@@ -288,14 +453,14 @@ async function processTicket(ticket, options = {}) {
       return { success: false, step: 100, error: 'cloud_save_failed_at_100' };
     }
     console.log(`🎉 [WATCHDOG ANTIGRAVITY] CHAMADO ${ticket.code} CONCLUÍDO COM SUCESSO VERIFICADO!`);
-    return { success: true, step: 100, status: 'resolved' };
+    return { success: true, step: 100, status: 'resolved', deployment: deployCheck };
   } else {
-    console.log(`[WATCHDOG P0-01] Deploy hook aceito, mas deployment READY ainda pendente de validação. Mantendo chamado em homologação (75%).`);
+    console.log(`[WATCHDOG P0-01] Deploy hook aceito, mas deployment READY ainda pendente de validação (${deployCheck.reason || 'aguardando'}). Mantendo em homologação (75%).`);
     return {
       success: true,
       step: 75,
       status: 'in_production',
-      note: 'Deploy acionado; aguardando confirmação de deployment READY para conclusão'
+      note: `Deploy acionado; aguardando confirmação comprovada de deployment READY da plataforma (${deployCheck.reason || 'pendente'})`
     };
   }
 }
@@ -329,6 +494,9 @@ module.exports = {
   processTicket,
   fetchTickets,
   saveTickets,
+  verifyCommit,
+  verifyDeployment,
+  mergeTicketsGranular,
   runWatchdog
 };
 

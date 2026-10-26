@@ -20,3 +20,5 @@ open_window_titles.txt
 *.bak
 *.tsbuildinfo
 portal_live_test.png
+
+.temp_build/

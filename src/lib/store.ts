@@ -371,15 +371,21 @@ export const INITIAL_TICKETS: Ticket[] = [
   }
 ];
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const DB_REPO = process.env.GITHUB_DB_REPO || 'HelpUSA/publicarte';
-const DB_PATH = process.env.GITHUB_DB_PATH || 'data/helpus_tickets.json';
+function getGitHubToken(): string {
+  return (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
+}
+function getDbRepo(): string {
+  return process.env.HELPUS_DB_REPO || process.env.GITHUB_DB_REPO || 'HelpUSA/publicarte';
+}
+function getDbPath(): string {
+  return process.env.HELPUS_DB_PATH || process.env.GITHUB_DB_PATH || 'data/helpus_tickets.json';
+}
 
 let cloudSha: string | null = null;
 
 function githubApiRequest(method: string, path: string, body?: any): Promise<{ status: number; data: any; raw: string }> {
   return new Promise((resolve) => {
-    const token = (GITHUB_TOKEN || '').trim();
+    const token = getGitHubToken();
     const payload = body ? JSON.stringify(body) : undefined;
     const req = https.request(
       {
@@ -414,8 +420,50 @@ function githubApiRequest(method: string, path: string, body?: any): Promise<{ s
   });
 }
 
-async function fetchGitHubTickets(): Promise<Ticket[] | null> {
-  const token = (GITHUB_TOKEN || '').trim();
+export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
+  const map = new Map<string, Ticket>();
+
+  for (const t of remoteTickets) {
+    map.set(t.id, { ...t, messages: [...(t.messages || [])] });
+  }
+
+  for (const localT of localTickets) {
+    const remoteT = map.get(localT.id);
+    if (!remoteT) {
+      map.set(localT.id, { ...localT, messages: [...(localT.messages || [])] });
+    } else {
+      const mergedMessagesMap = new Map<string, any>();
+      for (const m of (remoteT.messages || [])) {
+        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        mergedMessagesMap.set(key, m);
+      }
+      for (const m of (localT.messages || [])) {
+        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        mergedMessagesMap.set(key, m);
+      }
+
+      const mergedMessages = Array.from(mergedMessagesMap.values()).sort((a, b) =>
+        (a.createdAt || '').localeCompare(b.createdAt || '')
+      );
+
+      const localUpdated = localT.updatedAt || '';
+      const remoteUpdated = remoteT.updatedAt || '';
+      const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
+
+      map.set(localT.id, {
+        ...baseTicket,
+        messages: mergedMessages,
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+export async function fetchGitHubTickets(): Promise<Ticket[] | null> {
+  const token = getGitHubToken();
+  const DB_REPO = getDbRepo();
+  const DB_PATH = getDbPath();
   let fetchFailed = false;
 
   try {
@@ -469,10 +517,13 @@ async function fetchGitHubTickets(): Promise<Ticket[] | null> {
   return fetchFailed ? null : [];
 }
 
-async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Promise<{ success: boolean; error?: string }> {
-  if (!GITHUB_TOKEN || !GITHUB_TOKEN.trim()) {
+export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Promise<{ success: boolean; error?: string }> {
+  const token = getGitHubToken();
+  if (!token) {
     return { success: false, error: 'No GITHUB_TOKEN configured' };
   }
+  const DB_REPO = getDbRepo();
+  const DB_PATH = getDbPath();
 
   let attempt = 0;
   let currentTickets = [...tickets];
@@ -509,22 +560,12 @@ async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Promise<{ s
 
       // P1-01: Tratamento explícito de Conflito 409 (CAS Concurrency)
       if (putRes.status === 409) {
-        console.warn(`[CAS CONFLICT] 409 detectado na tentativa ${attempt}. Reconciliando base de tickets com versão remota...`);
+        console.warn(`[CAS CONFLICT] 409 detectado na tentativa ${attempt}. Reconciliando granularmente base de tickets com versao remota...`);
         const remoteTickets = await fetchGitHubTickets();
         if (remoteTickets && Array.isArray(remoteTickets)) {
-          const ticketMap = new Map<string, Ticket>();
-          for (const t of remoteTickets) {
-            ticketMap.set(t.id, t);
-          }
-          for (const localT of currentTickets) {
-            const remoteT = ticketMap.get(localT.id);
-            if (!remoteT || (localT.updatedAt || '') >= (remoteT.updatedAt || '')) {
-              ticketMap.set(localT.id, localT);
-            }
-          }
-          currentTickets = Array.from(ticketMap.values());
+          currentTickets = mergeTicketsGranular(remoteTickets, currentTickets);
         }
-        continue; // Retry com SHA atualizado
+        continue; // Retry com SHA atualizado e mensagens concorrentes preservadas
       }
 
       console.error(`GitHub API PUT failed status ${putRes.status}:`, putRes.raw);
@@ -705,15 +746,26 @@ export class TicketStore {
           const localOk = this.atomicSaveSync(filePath, this.tickets);
 
           let cloudResult: { success: boolean; error?: string } = { success: true };
-          if (GITHUB_TOKEN && GITHUB_TOKEN.trim()) {
+          const token = getGitHubToken();
+          if (token) {
             try {
               cloudResult = await saveGitHubTickets(this.tickets);
             } catch (cloudErr: any) {
               cloudResult = { success: false, error: cloudErr?.message || String(cloudErr) };
             }
+            if (!cloudResult.success) {
+              console.error(`[STORE CRITICAL] Falha na persistencia compartilhada remota: ${cloudResult.error}. Operacao rejeitada para evitar falso sucesso.`);
+              resolve({ success: false, error: cloudResult.error || 'Shared cloud persistence failed' });
+              return;
+            }
           }
 
-          resolve(cloudResult.success ? cloudResult : (localOk ? { success: true } : cloudResult));
+          if (!localOk && !getGitHubToken()) {
+            resolve({ success: false, error: 'Local file persistence failed and no cloud token configured' });
+            return;
+          }
+
+          resolve({ success: true });
         } catch (err: any) {
           resolve({ success: false, error: err?.message || String(err) });
         }

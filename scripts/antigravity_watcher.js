@@ -100,7 +100,12 @@ function verifyTicketEventIntegrity(event, maxFutureSkewMs = 60000, referenceNow
 // 2. process.env.SERVICE_WORKER_GITHUB_TOKEN (token de serviço com escopo Contents:read/write restrito)
 // 3. process.env.GITHUB_TOKEN / process.env.GH_TOKEN
 // Fail-closed: Se ausente, retorna null e bloqueia chamadas não autenticadas para proteger cotas do host.
-function resolveServiceWorkerToken(deps = {}) {
+// P0-01 & Ordem 041 & Ordem 048: Resolução segura de credencial de serviço de menor privilégio.
+// 1. Injeção explícita em testes isolados (deps.serviceWorkerToken / deps.githubToken).
+// 2. process.env.SERVICE_WORKER_GITHUB_TOKEN (token de serviço com escopo Contents restrito).
+// 3. No modo contínuo / worker de produção: EXCLUSIVAMENTE SERVICE_WORKER_GITHUB_TOKEN (zero fallback).
+// Fail-closed: Se ausente, retorna null e bloqueia chamadas não autenticadas para proteger cotas do host.
+function resolveServiceWorkerToken(deps = {}, options = {}) {
   if (deps.serviceWorkerToken && typeof deps.serviceWorkerToken === "string") {
     return deps.serviceWorkerToken.trim();
   }
@@ -108,13 +113,32 @@ function resolveServiceWorkerToken(deps = {}) {
     return deps.githubToken.trim();
   }
   const env = deps.env || process.env;
-  const token = (
-    env.SERVICE_WORKER_GITHUB_TOKEN ||
-    env.GITHUB_TOKEN ||
-    env.GH_TOKEN ||
-    ""
-  ).trim();
-  return token || null;
+  const swToken = (env.SERVICE_WORKER_GITHUB_TOKEN || "").trim();
+  if (swToken) {
+    return swToken;
+  }
+
+  // Ordem 048: No modo contínuo, proibição terminante de fallback para GITHUB_TOKEN, GH_TOKEN ou CLI
+  const isContinuous = Boolean(
+    options.isContinuous ||
+    deps.isContinuous ||
+    (typeof process !== 'undefined' && (
+      process.env.WORKER_MODE === 'continuous' ||
+      (Array.isArray(process.argv) && (process.argv.includes('--mode=continuous') || process.argv.includes('-c')))
+    ))
+  );
+
+  if (isContinuous) {
+    const hasLegacy = Boolean((env.GITHUB_TOKEN || env.GH_TOKEN || '').trim());
+    if (hasLegacy) {
+      console.warn('[WORKER AUTH POLICY] Modo contínuo exige exclusivamente SERVICE_WORKER_GITHUB_TOKEN. Fallback para GITHUB_TOKEN/GH_TOKEN/CLI rejeitado por política de menor privilégio.');
+    }
+    return null;
+  }
+
+  // Em chamadas ad-hoc não contínuas, fallback legado permitido
+  const legacyToken = (env.GITHUB_TOKEN || env.GH_TOKEN || "").trim();
+  return legacyToken || null;
 }
 
 function inspectTokenMetadata(token) {
@@ -418,8 +442,8 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
   return Array.from(map.values());
 }
 
-async function getGitHubHeaders(deps = {}) {
-  const token = resolveServiceWorkerToken(deps);
+async function getGitHubHeaders(deps = {}, options = {}) {
+  const token = resolveServiceWorkerToken(deps, options);
   const headers = {
     'User-Agent': 'Antigravity-Watchdog',
     'Accept': 'application/vnd.github+json'
@@ -487,7 +511,7 @@ async function safeParseHttpResponse(res, context = 'API') {
   return { ok: false, error: 'unsupported_response_type', status, contentType, origin };
 }
 // P1-02 & Ordem 039: Retorna null em falha de rede/API com parsing seguro de HTTP/JSON sem throws de Unexpected end of JSON
-async function fetchTickets(deps = {}) {
+async function fetchTickets(deps = {}, options = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
   const now = typeof deps.now === "function" ? deps.now() : (deps.now || Date.now());
 
@@ -500,9 +524,9 @@ async function fetchTickets(deps = {}) {
 
   // 2. Ordem 041: Fail-Closed se nenhuma credencial de serviço estiver configurada.
   // Impede que requisições não autenticadas ocorram em loop e esgotem a cota pública de IP do host.
-  const token = resolveServiceWorkerToken(deps);
+  const token = resolveServiceWorkerToken(deps, options);
   if (!token) {
-    console.warn("[WATCHDOG AUTH FAIL_CLOSED] Nenhuma credencial de serviço configurada (SERVICE_WORKER_GITHUB_TOKEN / GITHUB_TOKEN). Polling cancelado para proteger cotas do host.");
+    console.warn("[WATCHDOG AUTH FAIL_CLOSED] Nenhuma credencial de serviço configurada (SERVICE_WORKER_GITHUB_TOKEN). Polling cancelado para proteger cotas do host.");
     return null;
   }
 
@@ -510,7 +534,7 @@ async function fetchTickets(deps = {}) {
 
   // 3. Consulta Contents API no GitHub com parsing seguro e logs de auditoria
   try {
-    const headers = await getGitHubHeaders(deps);
+    const headers = await getGitHubHeaders(deps, options);
     const res = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, { headers, cache: "no-store" });
 
     if (res) {
@@ -600,9 +624,9 @@ async function fetchTickets(deps = {}) {
 }
 
 // P0-02 & P0-04: Reconciliação em nível de operação com CAS e retries sem perda de dados
-async function saveTickets(tickets, maxRetries = 3, deps = {}) {
+async function saveTickets(tickets, maxRetries = 3, deps = {}, options = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
-  const token = resolveServiceWorkerToken(deps);
+  const token = resolveServiceWorkerToken(deps, options);
 
   if (!token) {
     console.warn('[WATCHDOG SECURITY] Credencial de serviço não configurada. Salvamento remoto no GitHub Cloud suspenso.');
@@ -675,9 +699,9 @@ async function saveTickets(tickets, maxRetries = 3, deps = {}) {
 }
 
 // P0-A: Verificador estrito de procedência de commit no GitHub (Fail-closed; sem fallback por string)
-async function verifyCommit(tenant, commitSha, deps = {}) {
+async function verifyCommit(tenant, commitSha, deps = {}, options = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
-  const token = resolveServiceWorkerToken(deps);
+  const token = resolveServiceWorkerToken(deps, options);
 
   if (!commitSha || typeof commitSha !== 'string' || !/^[0-9a-f]{7,40}$/i.test(commitSha)) {
     return { valid: false, reason: 'invalid_sha_format' };
@@ -1326,7 +1350,7 @@ async function runWatchdogCycle(options = {}) {
   // 1. Recuperação proativa de jobs abandonados / órfãos após restart ou crash
   recoverOrphanedClaims(Date.now(), { deps: options.deps });
 
-  const tickets = await fetchTickets(options.deps);
+  const tickets = await fetchTickets(options.deps, options);
   if (!tickets || !Array.isArray(tickets)) {
     return { success: false, processedCount: 0, reason: 'fetch_failed' };
   }
@@ -1388,9 +1412,9 @@ async function runContinuousWorker(options = {}) {
   console.log("[WORKER] Iniciado com sucesso. Polling configurado para " + (pollIntervalMs / 1000) + "s.");
   console.log("[WORKER] Identidade: service_worker (Privilégios Mínimos / Zero Telemetria Falsa)");
 
-  const tokenMeta = inspectTokenMetadata(resolveServiceWorkerToken(options.deps));
+  const tokenMeta = inspectTokenMetadata(resolveServiceWorkerToken(options.deps, { isContinuous: true }));
   if (!tokenMeta.configured) {
-    console.warn("[WORKER AUTH WARN] Nenhuma credencial de serviço configurada (SERVICE_WORKER_GITHUB_TOKEN / GITHUB_TOKEN). Worker iniciará em modo FAIL-CLOSED aguardando credencial.");
+    console.warn("[WORKER AUTH WARN] Nenhuma credencial de serviço configurada (SERVICE_WORKER_GITHUB_TOKEN). Worker iniciará em modo FAIL-CLOSED aguardando credencial.");
   } else {
     console.log("[WORKER AUTH] Credencial de serviço detectada: " + tokenMeta.kind + " (tamanho: " + tokenMeta.length + ").");
   }
@@ -1414,7 +1438,7 @@ async function runContinuousWorker(options = {}) {
         continue;
       }
 
-      await runWatchdogCycle({ ...options, allowAutonomousDeploy: false });
+      await runWatchdogCycle({ ...options, isContinuous: true, allowAutonomousDeploy: false });
     } catch (err) {
       console.error("[WORKER ERROR Ciclo]:", err.message);
     }
@@ -1422,6 +1446,144 @@ async function runContinuousWorker(options = {}) {
     const elapsed = Date.now() - cycleStart;
     const sleepMs = Math.max(pollIntervalMs - elapsed, 2000);
     await new Promise((resolve) => setTimeout(resolve, sleepMs));
+  }
+}
+
+
+/**
+ * Ordem 048: Mecanismo de teste único de conexão autenticada SOMENTE-LEITURA.
+ * Não inicia polling contínuo, não invoca saveTickets, não modifica dados locais nem remotos.
+ * Retorna diagnóstico estruturado sem expor segredos.
+ */
+async function verifyServiceConnection(deps = {}, options = {}) {
+  const fetchFn = deps.fetch || globalThis.fetch;
+  const now = typeof deps.now === 'function' ? deps.now() : (deps.now || Date.now());
+
+  const token = resolveServiceWorkerToken(deps, options);
+  if (!token) {
+    return {
+      ok: false,
+      authenticated: false,
+      status: 401,
+      reason: 'missing_service_worker_token',
+      message: 'Nenhuma credencial SERVICE_WORKER_GITHUB_TOKEN configurada no ambiente.',
+      tokenMetadata: inspectTokenMetadata(null),
+      isReadOnlyVerified: true,
+      dataMutated: false,
+    };
+  }
+
+  const tokenMeta = inspectTokenMetadata(token);
+
+  try {
+    const headers = await getGitHubHeaders(deps, options);
+    const res = await fetchFn(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${now}`, {
+      headers,
+      cache: 'no-store',
+    });
+
+    if (res) {
+      updateRateLimitFromResponse(res, now);
+    }
+
+    const state = getRateLimitState();
+
+    if (res && res.status === 404) {
+      return {
+        ok: true,
+        authenticated: true,
+        status: 404,
+        reason: 'target_path_not_found',
+        message: `Repositório ${DB_REPO} acessível com autenticação válida, mas o arquivo ${DB_PATH} ainda não foi criado.`,
+        tokenMetadata: tokenMeta,
+        rateLimit: { limit: state.limit, remaining: state.remaining, resetEpochSec: state.resetEpochSec },
+        detectedScopes: state.detectedScopes,
+        targetRepo: DB_REPO,
+        targetPath: DB_PATH,
+        isReadOnlyVerified: true,
+        dataMutated: false,
+      };
+    }
+
+    if (res && (res.status === 403 || res.status === 429)) {
+      return {
+        ok: false,
+        authenticated: false,
+        status: res.status,
+        reason: res.status === 429 ? 'rate_limit_exceeded' : 'forbidden_or_rate_limited',
+        message: `GitHub API respondeu com HTTP ${res.status}. Verifique permissões ou limite de taxa.`,
+        tokenMetadata: tokenMeta,
+        rateLimit: { limit: state.limit, remaining: state.remaining, resetEpochSec: state.resetEpochSec },
+        detectedScopes: state.detectedScopes,
+        targetRepo: DB_REPO,
+        targetPath: DB_PATH,
+        isReadOnlyVerified: true,
+        dataMutated: false,
+      };
+    }
+
+    if (res && res.ok) {
+      const parsedHttp = await safeParseHttpResponse(res, 'GitHub Contents API Connection Probe');
+      let remoteSha = null;
+      let ticketCount = 0;
+
+      if (parsedHttp.ok && parsedHttp.data) {
+        remoteSha = parsedHttp.data.sha || null;
+        if (typeof parsedHttp.data.content === 'string') {
+          try {
+            const decoded = Buffer.from(parsedHttp.data.content, 'base64').toString('utf-8');
+            const arr = JSON.parse(decoded);
+            if (Array.isArray(arr)) ticketCount = arr.length;
+          } catch {}
+        }
+      }
+
+      return {
+        ok: true,
+        authenticated: true,
+        status: res.status,
+        reason: 'connection_verified',
+        message: `Conexão autenticada verificada com sucesso em ${DB_REPO}:${DB_PATH}.`,
+        tokenMetadata: tokenMeta,
+        rateLimit: { limit: state.limit, remaining: state.remaining, resetEpochSec: state.resetEpochSec },
+        detectedScopes: state.detectedScopes,
+        remoteSha,
+        ticketCount,
+        targetRepo: DB_REPO,
+        targetPath: DB_PATH,
+        isReadOnlyVerified: true,
+        dataMutated: false,
+      };
+    }
+
+    const status = res ? res.status : 0;
+    return {
+      ok: false,
+      authenticated: false,
+      status,
+      reason: 'api_error',
+      message: `GitHub API retornou status HTTP inesperado: ${status}`,
+      tokenMetadata: tokenMeta,
+      rateLimit: { limit: state.limit, remaining: state.remaining, resetEpochSec: state.resetEpochSec },
+      detectedScopes: state.detectedScopes,
+      targetRepo: DB_REPO,
+      targetPath: DB_PATH,
+      isReadOnlyVerified: true,
+      dataMutated: false,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      authenticated: false,
+      status: 0,
+      reason: 'network_exception',
+      message: `Exceção de rede ao testar conexão: ${err.message}`,
+      tokenMetadata: tokenMeta,
+      targetRepo: DB_REPO,
+      targetPath: DB_PATH,
+      isReadOnlyVerified: true,
+      dataMutated: false,
+    };
   }
 }
 
@@ -1460,14 +1622,31 @@ module.exports = {
   resetRateLimitState,
   isRateLimitBackoffActive,
   updateRateLimitFromResponse,
+  verifyServiceConnection,
 };
 
 if (require.main === module) {
   const args = process.argv.slice(2);
-  const isContinuous = args.includes('--mode=continuous') || args.includes('-c') || process.env.WORKER_MODE === 'continuous';
-  if (isContinuous) {
-    runContinuousWorker().catch((err) => console.error('[UNIFIED WORKER FATAL]:', err));
+  const isTestConn = args.includes('--test-connection') || args.includes('-t') || process.env.WORKER_MODE === 'test_connection';
+  if (isTestConn) {
+    verifyServiceConnection()
+      .then((report) => {
+        console.log('=======================================================');
+        console.log('  HelpUS Watcher — Teste de Conexao Autenticada (R/O)  ');
+        console.log('=======================================================');
+        console.log(JSON.stringify(report, null, 2));
+        process.exit(report.ok ? 0 : 1);
+      })
+      .catch((err) => {
+        console.error('[CONNECTION TEST FATAL]:', err.message);
+        process.exit(1);
+      });
   } else {
-    runWatchdog().catch((err) => console.error('[WATCHDOG ERROR]:', err));
+    const isContinuous = args.includes('--mode=continuous') || args.includes('-c') || process.env.WORKER_MODE === 'continuous';
+    if (isContinuous) {
+      runContinuousWorker().catch((err) => console.error('[UNIFIED WORKER FATAL]:', err));
+    } else {
+      runWatchdog().catch((err) => console.error('[WATCHDOG ERROR]:', err));
+    }
   }
 }

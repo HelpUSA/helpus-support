@@ -73,6 +73,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    delete body.events;
+    if (body.ticketData) {
+      delete body.ticketData.events;
+    }
     const tenantHeader = request.headers.get('x-tenant-id');
 
     let tenantId = body.tenantId || tenantHeader || 'publicarte';

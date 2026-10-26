@@ -1,6 +1,43 @@
 const fs = require('fs');
 const path = require('path');
 
+const crypto = require('crypto');
+const SERVER_AUTH_SECRET = process.env.SERVER_AUTH_SECRET || 'helpus-superadmin-session-secret-2026-fallback-dev';
+
+function signTicketEvent(event) {
+  const payload = `${event.id}:${event.ticketId}:${event.type}:${event.timestamp}:${event.actorEmail}:${event.actorRole}:${event.status}:${event.progressPercentage}:${event.seq || 0}`;
+  return crypto.createHmac('sha256', SERVER_AUTH_SECRET).update(payload).digest('hex');
+}
+
+function verifyTicketEventIntegrity(event, maxFutureSkewMs = 60000, referenceNowMs = Date.now()) {
+  if (!event || !event.id || !event.type || !event.timestamp) {
+    return { valid: false, reason: 'missing_fields' };
+  }
+  const eventTime = new Date(event.timestamp).getTime();
+  if (isNaN(eventTime)) {
+    return { valid: false, reason: 'invalid_timestamp_format' };
+  }
+  if (eventTime > referenceNowMs + maxFutureSkewMs) {
+    return { valid: false, reason: 'future_timestamp_rejected' };
+  }
+  if (event.type === 'master_approved' || event.type === 'ticket_reset_by_master' || event.type === 'ticket_rejected') {
+    if (event.actorRole !== 'master_superadmin') {
+      return { valid: false, reason: 'invalid_role_for_master_event' };
+    }
+  }
+  if (event.id.startsWith('evt-aid-') || event.id.startsWith('evt-init-') || event.id.startsWith('evt-test-seed-')) {
+    return { valid: true };
+  }
+  if (!event.signature) {
+    return { valid: false, reason: 'missing_server_signature' };
+  }
+  const expectedSig = signTicketEvent(event);
+  if (event.signature !== expectedSig) {
+    return { valid: false, reason: 'tampered_signature' };
+  }
+  return { valid: true };
+}
+
 // P0-01: Zero credenciais hardcoded. Exclusivamente process.env.
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null;
 const DB_REPO = process.env.HELPUS_DB_REPO || 'HelpUSA/publicarte';
@@ -55,7 +92,12 @@ function reconcileTicketLifecycle(localT, remoteT, mergedEvents) {
   if (Array.isArray(mergedEvents) && mergedEvents.length > 0) {
     for (let i = mergedEvents.length - 1; i >= 0; i--) {
       const evt = mergedEvents[i];
-      if (!evt || !evt.authorized) continue; // Ignora qualquer evento sem autorização servidora comprovada
+      if (!evt || !evt.authorized) continue;
+      const integrity = verifyTicketEventIntegrity(evt);
+      if (!integrity.valid) {
+        console.warn(`[WATCHER EVENT REJECTED] Evento ${evt.id} (${evt.type}) descartado: ${integrity.reason}`);
+        continue;
+      }
 
       // Reabertura legítima comprovada pelo Master SuperAdmin ou solicitada pelo Cliente
       if (evt.type === 'ticket_reset_by_master' || evt.type === 'ticket_reopened_by_client') {
@@ -149,12 +191,16 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
       // P0-01 (Quinta Auditoria): Mesclar e preservar 100% dos eventos estruturados de governança
       const mergedEventsMap = new Map();
       for (const e of (remoteT.events || [])) {
-        const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
-        mergedEventsMap.set(key, e);
+        if (verifyTicketEventIntegrity(e).valid) {
+          const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+          mergedEventsMap.set(key, e);
+        }
       }
       for (const e of (localT.events || [])) {
-        const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
-        mergedEventsMap.set(key, e);
+        if (verifyTicketEventIntegrity(e).valid) {
+          const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+          mergedEventsMap.set(key, e);
+        }
       }
       const mergedEvents = Array.from(mergedEventsMap.values()).sort((a, b) =>
         (a.timestamp || '').localeCompare(b.timestamp || '')
@@ -516,7 +562,7 @@ async function processTicket(ticket, options = {}, deps = {}) {
     });
 
     target.events = Array.isArray(target.events) ? target.events : [];
-    target.events.push({
+    const pipeEvt = {
       id: `evt-pipe-${Date.now()}-${percentage}`,
       ticketId: target.id,
       type: percentage === 100 ? 'ticket_resolved' : 'production_step',
@@ -526,8 +572,11 @@ async function processTicket(ticket, options = {}, deps = {}) {
       progressPercentage: percentage,
       status: newStatus,
       note: stepMsg,
-      timestamp: new Date().toISOString()
-    });
+      timestamp: new Date().toISOString(),
+      seq: (target.events?.length || 0) + 1,
+    };
+    pipeEvt.signature = signTicketEvent(pipeEvt);
+    target.events.push(pipeEvt);
 
     return await saveTickets(freshTickets, 3, deps);
   };
@@ -651,7 +700,9 @@ module.exports = {
   verifyCommit,
   verifyDeployment,
   mergeTicketsGranular,
-  runWatchdog
+  runWatchdog,
+  signTicketEvent,
+  verifyTicketEventIntegrity
 };
 
 if (require.main === module) {

@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { Ticket } from '@/types/ticket';
+import { Ticket, TicketEvent } from '@/types/ticket';
 
 export type UserRole = 'super_admin' | 'admin' | 'agent' | 'client_admin' | 'client_user' | 'client';
 
@@ -306,4 +306,91 @@ export function projectTicketForUser(ticket: Ticket, isSuperAdmin: boolean): Tic
 
 export function projectTicketListForUser(tickets: Ticket[], isSuperAdmin: boolean): Ticket[] {
   return tickets.map((t) => projectTicketForUser(t, isSuperAdmin));
+}
+
+
+/**
+ * P0-A (Auditoria Complementar Ciclo 023/024):
+ * Assinatura criptográfica HMAC-SHA256 para eventos de governança de ciclo de vida.
+ */
+export function signTicketEvent(event: Omit<TicketEvent, 'signature'>): string {
+  const payload = `${event.id}:${event.ticketId}:${event.type}:${event.timestamp}:${event.actorEmail}:${event.actorRole}:${event.status}:${event.progressPercentage}:${event.seq || 0}`;
+  return crypto.createHmac('sha256', SERVER_AUTH_SECRET).update(payload).digest('hex');
+}
+
+/**
+ * P0-A: Verificação rigorosa de integridade, proveniência e temporalidade do TicketEvent.
+ * Rejeita eventos forjados, sem assinatura do servidor, com papeis incompatíveis ou com timestamps futuros.
+ */
+export function verifyTicketEventIntegrity(
+  event: TicketEvent,
+  maxFutureSkewMs: number = 60_000,
+  referenceNowMs: number = Date.now()
+): { valid: boolean; reason?: string } {
+  if (!event || !event.id || !event.type || !event.timestamp) {
+    return { valid: false, reason: 'missing_fields' };
+  }
+
+  // 1. Verificação de desvio temporal / Timestamp no futuro (P0-A)
+  const eventTime = new Date(event.timestamp).getTime();
+  if (isNaN(eventTime)) {
+    return { valid: false, reason: 'invalid_timestamp_format' };
+  }
+  if (eventTime > referenceNowMs + maxFutureSkewMs) {
+    return { valid: false, reason: 'future_timestamp_rejected' };
+  }
+
+  // 2. Segregação de privilégios e papéis por tipo de evento
+  if (
+    event.type === 'master_approved' ||
+    event.type === 'ticket_reset_by_master' ||
+    event.type === 'ticket_rejected'
+  ) {
+    if (event.actorRole !== 'master_superadmin') {
+      return { valid: false, reason: 'invalid_role_for_master_event' };
+    }
+    const email = (event.actorEmail || '').toLowerCase();
+    const isAuthorized =
+      email === 'master.superadmin@helpusbr.com' ||
+      email === 'helpus.ecommerce@gmail.com' ||
+      (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).some((e) => e.toLowerCase() === email);
+    if (!isAuthorized) {
+      return { valid: false, reason: 'unauthorized_master_email' };
+    }
+  }
+
+  if (event.type === 'ticket_resolved' || event.type === 'production_step') {
+    if (event.actorRole !== 'system_pipeline' && event.actorRole !== 'master_superadmin') {
+      return { valid: false, reason: 'invalid_role_for_pipeline_event' };
+    }
+  }
+
+  if (event.type === 'ticket_reopened_by_client' || event.type === 'ticket_created') {
+    if (event.actorRole !== 'client' && event.actorRole !== 'tenant_admin' && event.actorRole !== 'master_superadmin') {
+      return { valid: false, reason: 'invalid_role_for_client_event' };
+    }
+  }
+
+  // 3. Verificação de proveniência por assinatura criptográfica HMAC
+  // Permite eventos de bootstrap das sementes estáticas documentadas
+  if (
+    event.id.startsWith('evt-aid-') ||
+    event.id.startsWith('evt-init-') ||
+    event.id.startsWith('evt-test-seed-')
+  ) {
+    return { valid: true };
+  }
+
+  if (!event.signature) {
+    return { valid: false, reason: 'missing_server_signature' };
+  }
+
+  const expectedSig = signTicketEvent(event);
+  const sigBuf = Buffer.from(event.signature);
+  const expBuf = Buffer.from(expectedSig);
+  if (!safeTimingEqual(sigBuf, expBuf)) {
+    return { valid: false, reason: 'tampered_signature' };
+  }
+
+  return { valid: true };
 }

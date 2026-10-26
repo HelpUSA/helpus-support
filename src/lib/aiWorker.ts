@@ -107,7 +107,7 @@ export class AIAutoCodingWorker {
     if (!ticket) return;
 
     const result = await this.executeAutoCodingTask(ticket, adminNotes);
-    ticketStore.completeTicketProduction(ticketId, result);
+    await ticketStore.completeTicketProductionAsync(ticketId, result);
   }
 
   async executeAutoCodingTask(ticket: Ticket, adminNotes?: string): Promise<AIExecutionResult> {

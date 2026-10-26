@@ -71,6 +71,12 @@ export async function PATCH(
 
     const body = await request.json();
 
+    // Boundary defense: client requests cannot inject forged lifecycle events
+    delete body.events;
+    if (body.ticketData) {
+      delete body.ticketData.events;
+    }
+
     // Ensure tickets are fetched from GitHub database on serverless execution
     await ticketStore.getTicketsAsync();
 
@@ -116,7 +122,7 @@ export async function PATCH(
       if (!existing && !INITIAL_TICKETS.some(t => t.id === id || t.code === id)) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
-      const updated = await ticketStore.resetTicket(id);
+      const updated = await ticketStore.resetTicket(id, auth.userEmail);
       if (!updated) {
         return NextResponse.json(
           { success: false, error: 'Falha na persistência remota ao reiniciar o chamado na nuvem.' },
@@ -140,7 +146,8 @@ export async function PATCH(
         id,
         'HelpUS Master SuperAdmin',
         body.adminNotes,
-        body.ticketData
+        body.ticketData,
+        auth.userEmail
       );
       if (!updated) {
         if (cloudSaveResult && !cloudSaveResult.success) {
@@ -194,7 +201,8 @@ export async function PATCH(
         id,
         body.rejectionReason,
         'HelpUS Master SuperAdmin',
-        body.ticketData
+        body.ticketData,
+        auth.userEmail
       );
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
@@ -315,7 +323,8 @@ export async function PATCH(
       const updated = await ticketStore.reopenTicketAsync(
         id,
         body.reason || 'Problema não totalmente sanado. Solicitando revisão.',
-        body.userName || (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente')
+        body.userName || (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente'),
+        auth.userEmail
       );
       if (!updated) {
         return NextResponse.json(
@@ -378,6 +387,12 @@ export async function POST(
     }
 
     const body = await request.json();
+
+    // Boundary defense: client requests cannot inject forged lifecycle events
+    delete body.events;
+    if (body.ticketData) {
+      delete body.ticketData.events;
+    }
 
     if (!body.content || (!body.senderId && !auth.userEmail)) {
       return NextResponse.json(

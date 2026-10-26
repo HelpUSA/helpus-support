@@ -11,8 +11,16 @@ import {
   verifyCommit,
   verifyDeployment,
   mergeTicketsGranular,
-  reconcileTicketLifecycle
+  reconcileTicketLifecycle,
+  signTicketEvent,
+  verifyTicketEventIntegrity
 } from './antigravity_watcher.js';
+
+function makeSignedEvent(evt) {
+  const event = { ...evt, seq: evt.seq || 1 };
+  event.signature = signTicketEvent(event);
+  return event;
+}
 
 let passed = 0;
 let failed = 0;
@@ -48,7 +56,7 @@ await test('P0-01: mergeTicketsGranular rejeita spoofing em mensagem de chat e p
       { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Publicação confirmada' }
     ],
     events: [
-      {
+      makeSignedEvent({
         id: 'evt-res-1',
         ticketId: 'AID-101',
         type: 'ticket_resolved',
@@ -58,7 +66,7 @@ await test('P0-01: mergeTicketsGranular rejeita spoofing em mensagem de chat e p
         progressPercentage: 100,
         status: 'resolved',
         timestamp: '2026-10-25T20:00:00.000Z'
-      }
+      })
     ]
   };
 
@@ -80,7 +88,7 @@ await test('P0-01: mergeTicketsGranular rejeita spoofing em mensagem de chat e p
       }
     ],
     events: [
-      {
+      makeSignedEvent({
         id: 'evt-res-1',
         ticketId: 'AID-101',
         type: 'ticket_resolved',
@@ -90,7 +98,7 @@ await test('P0-01: mergeTicketsGranular rejeita spoofing em mensagem de chat e p
         progressPercentage: 100,
         status: 'resolved',
         timestamp: '2026-10-25T20:00:00.000Z'
-      }
+      })
     ]
   };
 
@@ -114,7 +122,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura autorizada via Ticke
       { id: 'msg-res-1', createdAt: '2026-10-25T20:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '✨ [CONCLUÍDO & RESOLVIDO]: Finalizado' }
     ],
     events: [
-      {
+      makeSignedEvent({
         id: 'evt-res-1',
         ticketId: 'AID-101',
         type: 'ticket_resolved',
@@ -124,7 +132,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura autorizada via Ticke
         progressPercentage: 100,
         status: 'resolved',
         timestamp: '2026-10-25T20:00:00.000Z'
-      }
+      })
     ]
   };
 
@@ -140,7 +148,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura autorizada via Ticke
       { id: 'msg-reset-1792967000', createdAt: '2026-10-25T20:10:00.000Z', senderId: 'master.superadmin@helpusbr.com', content: "🔄 Chamado retornado para 'pending_approval' pelo Master SuperAdmin." }
     ],
     events: [
-      {
+      makeSignedEvent({
         id: 'evt-res-1',
         ticketId: 'AID-101',
         type: 'ticket_resolved',
@@ -150,8 +158,8 @@ await test('P0-01: mergeTicketsGranular preserva reabertura autorizada via Ticke
         progressPercentage: 100,
         status: 'resolved',
         timestamp: '2026-10-25T20:00:00.000Z'
-      },
-      {
+      }),
+      makeSignedEvent({
         id: 'evt-reset-1792967000',
         ticketId: 'AID-101',
         type: 'ticket_reset_by_master',
@@ -161,7 +169,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura autorizada via Ticke
         progressPercentage: 0,
         status: 'pending_approval',
         timestamp: '2026-10-25T20:10:00.000Z'
-      }
+      })
     ]
   };
 
@@ -185,7 +193,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura solicitada pelo clie
       { id: 'msg-prg-1', createdAt: '2026-10-25T19:00:00.000Z', senderId: 'ci.cd@helpusbr.com', content: '⚡ [PROGRESSO REAL 75%]: Deploy acionado na Vercel Cloud' }
     ],
     events: [
-      {
+      makeSignedEvent({
         id: 'evt-prg-75',
         ticketId: 'AID-101',
         type: 'production_step',
@@ -195,7 +203,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura solicitada pelo clie
         progressPercentage: 75,
         status: 'in_production',
         timestamp: '2026-10-25T19:00:00.000Z'
-      }
+      })
     ]
   };
 
@@ -209,7 +217,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura solicitada pelo clie
       { id: 'msg-reopen-client', createdAt: '2026-10-25T19:30:00.000Z', senderId: 'cliente@helpus.com', content: '🔄 *Chamado Reaberto pelo Cliente*\n\nMotivo: Necessário revisão do layout' }
     ],
     events: [
-      {
+      makeSignedEvent({
         id: 'evt-prg-75',
         ticketId: 'AID-101',
         type: 'production_step',
@@ -219,8 +227,8 @@ await test('P0-01: mergeTicketsGranular preserva reabertura solicitada pelo clie
         progressPercentage: 75,
         status: 'in_production',
         timestamp: '2026-10-25T19:00:00.000Z'
-      },
-      {
+      }),
+      makeSignedEvent({
         id: 'evt-reopen-client',
         ticketId: 'AID-101',
         type: 'ticket_reopened_by_client',
@@ -230,7 +238,7 @@ await test('P0-01: mergeTicketsGranular preserva reabertura solicitada pelo clie
         progressPercentage: 0,
         status: 'pending_approval',
         timestamp: '2026-10-25T19:30:00.000Z'
-      }
+      })
     ]
   };
 
@@ -583,6 +591,76 @@ await test('P0-B: verifyDeployment aprova deployment READY comprovado em produç
 });
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// TESTE P0-A: Rejeição Rigorosa de Timestamp no Futuro (Desvio Temporal)
+// ---------------------------------------------------------------------------
+await test('P0-A: verifyTicketEventIntegrity rejeita eventos com timestamps futuros (skew > 60s)', () => {
+  const futureEvent = makeSignedEvent({
+    id: 'evt-future-1',
+    ticketId: 'AID-101',
+    type: 'ticket_reset_by_master',
+    actorEmail: 'master.superadmin@helpusbr.com',
+    actorRole: 'master_superadmin',
+    authorized: true,
+    progressPercentage: 0,
+    status: 'pending_approval',
+    timestamp: '2099-01-01T00:00:00.000Z'
+  });
+
+  const check = verifyTicketEventIntegrity(futureEvent);
+  assert.equal(check.valid, false, 'Evento com timestamp futuro DEVE ser sumariamente rejeitado');
+  assert.equal(check.reason, 'future_timestamp_rejected');
+});
+
+// ---------------------------------------------------------------------------
+// TESTE P0-A: Rejeição de Assinatura Ausente ou Adulterada (HMAC Integrity)
+// ---------------------------------------------------------------------------
+await test('P0-A: verifyTicketEventIntegrity rejeita eventos sem assinatura HMAC ou adulterados', () => {
+  const unsignedEvent = {
+    id: 'evt-unsigned-1',
+    ticketId: 'AID-101',
+    type: 'ticket_resolved',
+    actorEmail: 'ci.cd@helpusbr.com',
+    actorRole: 'system_pipeline',
+    authorized: true,
+    progressPercentage: 100,
+    status: 'resolved',
+    timestamp: new Date().toISOString()
+  };
+
+  const checkUnsigned = verifyTicketEventIntegrity(unsignedEvent);
+  assert.equal(checkUnsigned.valid, false);
+  assert.equal(checkUnsigned.reason, 'missing_server_signature');
+
+  const tamperedEvent = makeSignedEvent(unsignedEvent);
+  tamperedEvent.signature = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+  const checkTampered = verifyTicketEventIntegrity(tamperedEvent);
+  assert.equal(checkTampered.valid, false);
+  assert.equal(checkTampered.reason, 'tampered_signature');
+});
+
+// ---------------------------------------------------------------------------
+// TESTE P0-A: Rejeição de Eventos com Papel (ActorRole) Não Autorizado
+// ---------------------------------------------------------------------------
+await test('P0-A: verifyTicketEventIntegrity rejeita papel não autorizado para eventos de governança restrita', () => {
+  const spoofedRoleEvent = makeSignedEvent({
+    id: 'evt-spoofed-role-1',
+    ticketId: 'AID-101',
+    type: 'ticket_reset_by_master',
+    actorEmail: 'cliente@helpus.com',
+    actorRole: 'client', // Rejeitado: apenas master_superadmin pode emitir reset_by_master
+    authorized: true,
+    progressPercentage: 0,
+    status: 'pending_approval',
+    timestamp: new Date().toISOString()
+  });
+
+  const checkRole = verifyTicketEventIntegrity(spoofedRoleEvent);
+  assert.equal(checkRole.valid, false);
+  assert.equal(checkRole.reason, 'invalid_role_for_master_event');
+});
+
 // TESTE 13: Rejeição Estrita de Tenant Desconhecido (P1-01)
 // ---------------------------------------------------------------------------
 await test('P1-01: Rejeitar estritamente tenant desconhecido com erro de segurança e sem fallback', async () => {

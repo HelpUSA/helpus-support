@@ -25,7 +25,9 @@ export interface TicketEvent {
   note?: string;
   metadata?: Record<string, any>;
   timestamp: string; // ISO 8601
+  seq?: number;
   idempotencyKey?: string;
+  signature?: string; // Assinatura HMAC de proveniência do servidor
 }
 
 export interface Tenant {

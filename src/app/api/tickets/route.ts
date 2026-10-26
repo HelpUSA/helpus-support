@@ -28,8 +28,8 @@ export async function GET(request: NextRequest) {
   // 2. Isolamento Rígido Multi-Tenant:
   let effectiveTenant: string | undefined;
 
-  if (auth.isSuperAdmin) {
-    // SuperAdmin comprovado tem autorização para consultar 'all' ou tenant específico
+  if (auth.isSuperAdmin || auth.isServiceWorker) {
+    // SuperAdmin ou ServiceWorker pode consultar 'all' ou tenant específico
     effectiveTenant = requestedTenant && requestedTenant !== 'all' ? requestedTenant : undefined;
   } else {
     // Usuários comuns ou administradores de cliente NUNCA podem consultar 'all'

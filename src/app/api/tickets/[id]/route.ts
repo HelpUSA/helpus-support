@@ -94,12 +94,25 @@ export async function PATCH(
     const isSuperAdminCaller = auth.isSuperAdmin;
 
     if (body.action === 'progress') {
-      if (!isSuperAdminCaller) {
+      if (!isSuperAdminCaller && !auth.isServiceWorker) {
         return NextResponse.json(
-          { success: false, error: 'Operação negada: Apenas o Administrador SuperAdmin pode atualizar o progresso de execução.' },
+          { success: false, error: 'Operação negada: Apenas o Administrador SuperAdmin ou Service Worker autorizado pode atualizar o progresso de execução.' },
           { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
+
+      // Ordem 033: Restrição de tenant para service_worker
+      if (auth.isServiceWorker && !auth.isSuperAdmin) {
+        const allowed = auth.allowedTenantIds || [];
+        const isAllowedTenant = allowed.includes('all') || allowed.includes(existingTicket.tenantId);
+        if (!isAllowedTenant) {
+          return NextResponse.json(
+            { success: false, error: `Acesso negado: Service Worker não possui escopo autorizado para o tenant '${existingTicket.tenantId}'.` },
+            { status: 403, headers: ANTI_CACHE_HEADERS }
+          );
+        }
+      }
+
       const updated = await ticketStore.updateTicketProgress(
         id,
         Number(body.percentage || 0),

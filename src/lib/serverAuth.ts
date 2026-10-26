@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import { Ticket, TicketEvent } from '@/types/ticket';
 
-export type UserRole = 'super_admin' | 'admin' | 'agent' | 'client_admin' | 'client_user' | 'client';
+export type UserRole = 'super_admin' | 'admin' | 'agent' | 'client_admin' | 'client_user' | 'client' | 'service_worker';
 
 export const AUTHORIZED_SUPERADMIN_EMAILS = [
   'helpus.ecommerce@gmail.com',
@@ -61,6 +61,7 @@ export interface SessionPayload {
 export interface ServerAuthDecision {
   authenticated: boolean;
   isSuperAdmin: boolean;
+  isServiceWorker?: boolean;
   userEmail?: string;
   userId?: string;
   role?: UserRole;
@@ -234,15 +235,17 @@ export function validateServerApiAccess(headers: { get(name: string): string | n
     const verified = verifySessionToken(tokenToVerify);
     if (verified) {
       const isSuperAdmin = verified.role === 'super_admin';
+      const isServiceWorker = verified.role === 'service_worker';
       return {
         authenticated: true,
         isSuperAdmin,
+        isServiceWorker,
         userEmail: verified.email,
         userId: verified.userId,
         role: verified.role,
         userRole: verified.role,
-        tenantId: isSuperAdmin ? 'all' : verified.tenantId,
-        allowedTenantIds: isSuperAdmin ? ['all'] : verified.allowedTenantIds,
+        tenantId: isSuperAdmin ? 'all' : (verified.tenantId || (verified.allowedTenantIds && verified.allowedTenantIds[0]) || 'all'),
+        allowedTenantIds: isSuperAdmin ? ['all'] : (verified.allowedTenantIds || (verified.tenantId ? [verified.tenantId] : ['all'])),
         user: {
           id: verified.userId,
           email: verified.email,

@@ -770,6 +770,11 @@ export class TicketStore {
   private tickets: Ticket[] = INITIAL_TICKETS;
   private tenants: Tenant[] = INITIAL_TENANTS;
 
+  // Ordem 033: Metodo de instancia para compatibilidade de testes e CAS
+  mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
+    return mergeTicketsGranular(remoteTickets, localTickets);
+  }
+
   constructor() {
     this.load();
   }
@@ -988,8 +993,11 @@ export class TicketStore {
     if (typeof window === 'undefined') {
       try {
         const cloudTickets = await fetchGitHubTickets();
-        const baseTickets = (Array.isArray(cloudTickets) && cloudTickets.length > 0) ? cloudTickets : this.tickets;
-        const merged = [...baseTickets];
+        // P0-DURABLE (Ordem 031): Preservar estritamente o estado local (this.tickets) ao mesclar com cloudTickets.
+        // Impede que tickets locais ativos (ex: AID-101 em andamento) sejam sobrescritos por INITIAL_TICKETS.
+        const merged = (Array.isArray(cloudTickets) && cloudTickets.length > 0)
+          ? mergeTicketsGranular(cloudTickets, this.tickets)
+          : [...this.tickets];
         for (const initTicket of INITIAL_TICKETS) {
           if (!merged.some((t) => t.id === initTicket.id || t.code === initTicket.code)) {
             merged.push(initTicket);

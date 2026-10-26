@@ -5,6 +5,17 @@ const crypto = require('crypto');
 
 // P0-A (Ciclo 027): Eliminação total de segredo estático fallback no repositório.
 // Fail-closed em produção/Vercel. Chave efêmera aleatória em dev/test.
+function getSessionSecret() {
+  const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET || process.env.SUPERADMIN_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') {
+      throw new Error('[SECURITY FATAL] SESSION_SECRET não configurado em ambiente de produção.');
+    }
+    return global.__EPHEMERAL_SESSION_SECRET || (global.__EPHEMERAL_SESSION_SECRET = crypto.randomBytes(32).toString('hex'));
+  }
+  return secret;
+}
+
 function getEventHmacSecret() {
   const secret = process.env.EVENT_HMAC_SECRET || process.env.TICKET_EVENT_SECRET;
   if (!secret) {
@@ -712,27 +723,119 @@ async function processTicket(ticket, options = {}, deps = {}) {
   }
 }
 
-async function runWatchdog() {
-  console.log(`[WATCHDOG ${new Date().toLocaleTimeString('pt-BR')}] Verificando banco de dados no GitHub Cloud...`);
-  const tickets = await fetchTickets();
+// P0-AUTH (Ordem 031): Identidade de serviço com privilégios mínimos para o Watcher
+function getServiceWorkerToken(expiresInSeconds = 300, options = {}) {
+  const secret = getSessionSecret();
+  const now = Math.floor(Date.now() / 1000);
+  const tenantId = options.tenantId || 'all';
+  const allowedTenantIds = options.allowedTenantIds || (tenantId === 'all' ? ['all'] : [tenantId]);
+  const payload = {
+    userId: options.userId || 'usr-service-worker-watcher',
+    email: options.email || 'service.worker@helpusbr.com',
+    role: 'service_worker',
+    tenantId,
+    allowedTenantIds,
+    iat: now,
+    exp: now + expiresInSeconds,
+    iss: 'helpus-support-server'
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(`v1.${payloadB64}`).digest('base64url');
+  return `v1.${payloadB64}.${sig}`;
+}
+
+// P0-EXEC (Ordem 031): Fila durável com leases em memória e idempotência de execuções
+const activeLeases = new Map(); // ticketId -> { leaseUntil, attemptId, status }
+const LEASE_DURATION_MS = 60000;
+
+function clearExpiredLeases(now = Date.now()) {
+  for (const [id, lease] of activeLeases.entries()) {
+    if (lease.leaseUntil <= now) {
+      activeLeases.delete(id);
+    }
+  }
+}
+
+function acquireLease(ticketId, currentStatus, durationMs = LEASE_DURATION_MS, now = Date.now()) {
+  clearExpiredLeases(now);
+  const existing = activeLeases.get(ticketId);
+  if (existing && existing.leaseUntil > now && existing.status === currentStatus) {
+    return null; // Lease ativo e status inalterado: suprime execução duplicada
+  }
+  const attemptId = `att-${now}-${crypto.randomBytes(4).toString('hex')}`;
+  activeLeases.set(ticketId, {
+    leaseUntil: now + durationMs,
+    attemptId,
+    status: currentStatus,
+    acquiredAt: now
+  });
+  return attemptId;
+}
+
+function releaseLease(ticketId) {
+  activeLeases.delete(ticketId);
+}
+
+async function runWatchdogCycle(options = {}) {
+  const tickets = await fetchTickets(options.deps);
   if (!tickets || !Array.isArray(tickets)) {
-    console.warn('[WATCHDOG] Consulta ao banco remoto indisponível neste ciclo. Tentando novamente no próximo ciclo.');
-    return;
+    return { success: false, processedCount: 0, reason: 'fetch_failed' };
   }
 
   const pendingProduction = tickets.filter((t) => t.status === 'in_production' && t.progressPercentage !== 100);
-
-  if (pendingProduction.length === 0) {
-    console.log('[WATCHDOG] NENHUM chamado aguardando execução em produção no momento.');
-    return;
-  }
+  let processedCount = 0;
 
   for (const t of pendingProduction) {
-    try {
-      await processTicket(t, { allowAutonomousDeploy: false });
-    } catch (err) {
-      console.error(`[WATCHDOG] Falha ao processar chamado [${t.code}]:`, err.message);
+    const attemptId = acquireLease(t.id, t.status);
+    if (!attemptId) {
+      console.log(`[WATCHDOG DEDUPLICATION] Chamado [${t.code}] já em execução sob lease ativo. Ignorando disparo duplicado.`);
+      continue;
     }
+
+    try {
+      console.log(`[WATCHDOG LEASE] Adquirido lease [${attemptId}] para o chamado [${t.code}].`);
+      await processTicket(t, { ...options, attemptId }, options.deps);
+      processedCount++;
+    } catch (err) {
+      console.error(`[WATCHDOG] Falha ao processar chamado [${t.code}] (attempt: ${attemptId}):`, err.message);
+      releaseLease(t.id); // Libera o lease imediatamente em caso de erro para permitir retry
+    }
+  }
+
+  return { success: true, processedCount, totalPending: pendingProduction.length };
+}
+
+async function runWatchdog() {
+  console.log(`[WATCHDOG ${new Date().toLocaleTimeString('pt-BR')}] Verificando banco de dados no GitHub Cloud...`);
+  return await runWatchdogCycle({ allowAutonomousDeploy: false });
+}
+
+async function runContinuousWorker(options = {}) {
+  const pollIntervalMs = options.pollIntervalMs || 5000;
+  let isRunning = true;
+
+  console.log('=======================================================');
+  console.log('    HelpUS Unified Ticket Worker (Node.js Service)     ');
+  console.log('=======================================================');
+  console.log(`[WORKER] Iniciado com sucesso. Polling a cada ${pollIntervalMs / 1000}s.`);
+  console.log('[WORKER] Identidade: service_worker (Privilégios Mínimos / Zero Telemetria Falsa)');
+
+  const cleanup = () => {
+    console.log('\n[WORKER] Sinal de encerramento recebido. Finalizando com segurança...');
+    isRunning = false;
+    process.exit(0);
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
+
+  while (isRunning) {
+    try {
+      await runWatchdogCycle({ ...options, allowAutonomousDeploy: false });
+    } catch (err) {
+      console.error('[WORKER ERROR Ciclo]:', err.message);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 }
 
@@ -746,10 +849,23 @@ module.exports = {
   verifyDeployment,
   mergeTicketsGranular,
   runWatchdog,
+  runWatchdogCycle,
+  runContinuousWorker,
   signTicketEvent,
-  verifyTicketEventIntegrity
+  verifyTicketEventIntegrity,
+  getServiceWorkerToken,
+  acquireLease,
+  releaseLease,
+  clearExpiredLeases,
+  activeLeases,
 };
 
 if (require.main === module) {
-  runWatchdog().catch((err) => console.error('[WATCHDOG ERROR]:', err));
+  const args = process.argv.slice(2);
+  const isContinuous = args.includes('--mode=continuous') || args.includes('-c') || process.env.WORKER_MODE === 'continuous';
+  if (isContinuous) {
+    runContinuousWorker().catch((err) => console.error('[UNIFIED WORKER FATAL]:', err));
+  } else {
+    runWatchdog().catch((err) => console.error('[WATCHDOG ERROR]:', err));
+  }
 }

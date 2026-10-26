@@ -414,8 +414,10 @@ function githubApiRequest(method: string, path: string, body?: any): Promise<{ s
   });
 }
 
-async function fetchGitHubTickets(): Promise<Ticket[]> {
+async function fetchGitHubTickets(): Promise<Ticket[] | null> {
   const token = (GITHUB_TOKEN || '').trim();
+  let fetchFailed = false;
+
   try {
     // 1. Obter metadata para atualizar cloudSha
     const meta = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
@@ -425,9 +427,14 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
         const content = Buffer.from(meta.data.content, 'base64').toString('utf-8');
         return JSON.parse(content);
       }
+    } else if (meta.status === 404) {
+      // 404 legítimo: base ainda não existe remotamente
+      return [];
+    } else if (meta.status >= 400) {
+      fetchFailed = true;
     }
 
-    // 2. Quando o arquivo excede 1MB, o GitHub omite 'content'. Buscar via Accept: application/vnd.github.raw
+    // 2. Se content foi omitido pelo tamanho, buscar raw
     const rawApiRes = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, {
       headers: {
         'User-Agent': 'HelpUS-Support-Hub',
@@ -442,6 +449,7 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
     }
   } catch (err) {
     console.error('Error fetching tickets from GitHub API:', err);
+    fetchFailed = true;
   }
 
   try {
@@ -454,44 +462,82 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
     }
   } catch (err) {
     console.error('Error fetching tickets from raw GitHub:', err);
+    fetchFailed = true;
   }
-  return [];
+
+  // P1-02: Se houve falha de rede/API, retorna null para não mascarar falhas como base vazia
+  return fetchFailed ? null : [];
 }
 
-async function saveGitHubTickets(tickets: Ticket[]): Promise<{ success: boolean; error?: string }> {
+async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Promise<{ success: boolean; error?: string }> {
   if (!GITHUB_TOKEN || !GITHUB_TOKEN.trim()) {
     return { success: false, error: 'No GITHUB_TOKEN configured' };
   }
 
-  try {
-    const check = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
-    let latestSha: string | undefined = undefined;
-    if (check.status === 200 && check.data && check.data.sha) {
-      latestSha = check.data.sha;
-      cloudSha = check.data.sha;
-    } else {
-      return { success: false, error: `Check SHA failed (${check.status}): ${check.raw}` };
-    }
+  let attempt = 0;
+  let currentTickets = [...tickets];
 
-    const putRes = await githubApiRequest('PUT', `/repos/${DB_REPO}/contents/${DB_PATH}`, {
-      message: 'db(sync): update tickets database in cloud',
-      content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),
-      sha: latestSha || cloudSha || undefined,
-      branch: 'main',
-    });
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      // 1. Obter SHA mais recente via CAS
+      const check = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
+      let latestSha: string | undefined = undefined;
+      if (check.status === 200 && check.data && check.data.sha) {
+        latestSha = check.data.sha;
+        cloudSha = check.data.sha;
+      } else if (check.status === 404) {
+        // Arquivo ainda não existe na branch, SHA inicial fica undefined
+        latestSha = undefined;
+      } else {
+        return { success: false, error: `Check SHA failed (${check.status}): ${check.raw}` };
+      }
 
-    if (putRes.status === 200 || putRes.status === 201) {
-      cloudSha = putRes.data?.content?.sha || cloudSha;
-      console.log('Successfully saved tickets to GitHub Cloud database!');
-      return { success: true };
-    } else {
+      // 2. PUT com Compare-And-Swap (SHA)
+      const putRes = await githubApiRequest('PUT', `/repos/${DB_REPO}/contents/${DB_PATH}`, {
+        message: `db(sync): update tickets database in cloud (CAS attempt ${attempt})`,
+        content: Buffer.from(JSON.stringify(currentTickets, null, 2), 'utf-8').toString('base64'),
+        sha: latestSha,
+        branch: 'main',
+      });
+
+      if (putRes.status === 200 || putRes.status === 201) {
+        cloudSha = putRes.data?.content?.sha || cloudSha;
+        console.log(`Successfully saved tickets to GitHub Cloud database on attempt ${attempt}!`);
+        return { success: true };
+      }
+
+      // P1-01: Tratamento explícito de Conflito 409 (CAS Concurrency)
+      if (putRes.status === 409) {
+        console.warn(`[CAS CONFLICT] 409 detectado na tentativa ${attempt}. Reconciliando base de tickets com versão remota...`);
+        const remoteTickets = await fetchGitHubTickets();
+        if (remoteTickets && Array.isArray(remoteTickets)) {
+          const ticketMap = new Map<string, Ticket>();
+          for (const t of remoteTickets) {
+            ticketMap.set(t.id, t);
+          }
+          for (const localT of currentTickets) {
+            const remoteT = ticketMap.get(localT.id);
+            if (!remoteT || (localT.updatedAt || '') >= (remoteT.updatedAt || '')) {
+              ticketMap.set(localT.id, localT);
+            }
+          }
+          currentTickets = Array.from(ticketMap.values());
+        }
+        continue; // Retry com SHA atualizado
+      }
+
       console.error(`GitHub API PUT failed status ${putRes.status}:`, putRes.raw);
       return { success: false, error: `GitHub PUT failed (${putRes.status}): ${putRes.raw}` };
+    } catch (err: any) {
+      console.error(`Exception during GitHub tickets save (attempt ${attempt}):`, err);
+      if (attempt >= maxRetries) {
+        return { success: false, error: err?.message || String(err) };
+      }
     }
-  } catch (err: any) {
-    console.error('Error saving tickets to GitHub:', err);
-    return { success: false, error: err?.message || String(err) };
   }
+
+  return { success: false, error: 'CAS_409_MAX_RETRIES_EXCEEDED' };
 }
 
 export class TicketStore {

@@ -420,6 +420,14 @@ function githubApiRequest(method: string, path: string, body?: any): Promise<{ s
   });
 }
 
+const STATUS_RANK: Record<string, number> = {
+  open: 10,
+  pending_approval: 20,
+  in_production: 30,
+  resolved: 40,
+  closed: 50,
+};
+
 export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
   const map = new Map<string, Ticket>();
 
@@ -432,13 +440,14 @@ export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Tick
     if (!remoteT) {
       map.set(localT.id, { ...localT, messages: [...(localT.messages || [])] });
     } else {
+      // P0-04: Deduplicação e preservação estrita de mensagens concorrentes
       const mergedMessagesMap = new Map<string, any>();
       for (const m of (remoteT.messages || [])) {
-        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        const key = `${m.id || ''}_${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
         mergedMessagesMap.set(key, m);
       }
       for (const m of (localT.messages || [])) {
-        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        const key = `${m.id || ''}_${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
         mergedMessagesMap.set(key, m);
       }
 
@@ -446,12 +455,27 @@ export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Tick
         (a.createdAt || '').localeCompare(b.createdAt || '')
       );
 
+      // P1: Monotonicidade de estado - status aprovado ou em produção não regride
+      const localRank = STATUS_RANK[localT.status] || 0;
+      const remoteRank = STATUS_RANK[remoteT.status] || 0;
+      let finalStatus = localT.status;
+      if (remoteRank > localRank) {
+        finalStatus = remoteT.status;
+      } else if (localRank > remoteRank) {
+        finalStatus = localT.status;
+      } else {
+        finalStatus = (localT.updatedAt || '') >= (remoteT.updatedAt || '') ? localT.status : remoteT.status;
+      }
+
+      const finalProgress = Math.max(localT.progressPercentage || 0, remoteT.progressPercentage || 0);
       const localUpdated = localT.updatedAt || '';
       const remoteUpdated = remoteT.updatedAt || '';
       const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
 
       map.set(localT.id, {
         ...baseTicket,
+        status: finalStatus as any,
+        progressPercentage: finalProgress,
         messages: mergedMessages,
       });
     }
@@ -562,10 +586,12 @@ export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Prom
       if (putRes.status === 409) {
         console.warn(`[CAS CONFLICT] 409 detectado na tentativa ${attempt}. Reconciliando granularmente base de tickets com versao remota...`);
         const remoteTickets = await fetchGitHubTickets();
-        if (remoteTickets && Array.isArray(remoteTickets)) {
-          currentTickets = mergeTicketsGranular(remoteTickets, currentTickets);
+        if (!remoteTickets || !Array.isArray(remoteTickets)) {
+          console.error(`[CAS ABORT] Re-fetch falhou durante conflito 409 na tentativa ${attempt}. Abortando retry para evitar corrupcao de dados.`);
+          return { success: false, error: 'CAS_409_REFETCH_FAILED' };
         }
-        continue; // Retry com SHA atualizado e mensagens concorrentes preservadas
+        currentTickets = mergeTicketsGranular(remoteTickets, currentTickets);
+        continue; // Retry com SHA atualizado e historico preservado
       }
 
       console.error(`GitHub API PUT failed status ${putRes.status}:`, putRes.raw);
@@ -746,7 +772,16 @@ export class TicketStore {
           const localOk = this.atomicSaveSync(filePath, this.tickets);
 
           let cloudResult: { success: boolean; error?: string } = { success: true };
+          const isServerlessOrProd = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production');
           const token = getGitHubToken();
+
+          // P0-C: Persistencia compartilhada duravel e obrigatoria em producao/Vercel
+          if (!token && isServerlessOrProd) {
+            console.error('[STORE CRITICAL] Backend persistente compartilhado (GITHUB_TOKEN) nao configurado em ambiente de producao/serverless. Rejeitando gravacao para evitar perda de dados.');
+            resolve({ success: false, error: 'SHARED_BACKEND_UNAVAILABLE_IN_PRODUCTION' });
+            return;
+          }
+
           if (token) {
             try {
               cloudResult = await saveGitHubTickets(this.tickets);
@@ -760,7 +795,7 @@ export class TicketStore {
             }
           }
 
-          if (!localOk && !getGitHubToken()) {
+          if (!localOk && !token) {
             resolve({ success: false, error: 'Local file persistence failed and no cloud token configured' });
             return;
           }

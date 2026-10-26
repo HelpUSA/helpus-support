@@ -42,7 +42,15 @@ const TENANTS = {
 
 let cloudSha = null;
 
-// Reconciliação granular de tickets para concorrência CAS sem perda de mensagens (P0-04)
+const STATUS_RANK = {
+  open: 10,
+  pending_approval: 20,
+  in_production: 30,
+  resolved: 40,
+  closed: 50,
+};
+
+// Reconciliação granular de tickets para concorrência CAS sem perda de mensagens e sem regressão de status (P0-04 / P1)
 function mergeTicketsGranular(remoteTickets, localTickets) {
   const map = new Map();
 
@@ -57,11 +65,11 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
     } else {
       const mergedMessagesMap = new Map();
       for (const m of (remoteT.messages || [])) {
-        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        const key = `${m.id || ''}_${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
         mergedMessagesMap.set(key, m);
       }
       for (const m of (localT.messages || [])) {
-        const key = m.id || `${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        const key = `${m.id || ''}_${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
         mergedMessagesMap.set(key, m);
       }
 
@@ -69,12 +77,27 @@ function mergeTicketsGranular(remoteTickets, localTickets) {
         (a.createdAt || '').localeCompare(b.createdAt || '')
       );
 
+      // P1: Monotonicidade do ciclo de vida: status aprovado/produção não regride
+      const localRank = STATUS_RANK[localT.status] || 0;
+      const remoteRank = STATUS_RANK[remoteT.status] || 0;
+      let finalStatus = localT.status;
+      if (remoteRank > localRank) {
+        finalStatus = remoteT.status;
+      } else if (localRank > remoteRank) {
+        finalStatus = localT.status;
+      } else {
+        finalStatus = (localT.updatedAt || '') >= (remoteT.updatedAt || '') ? localT.status : remoteT.status;
+      }
+
+      const finalProgress = Math.max(localT.progressPercentage || 0, remoteT.progressPercentage || 0);
       const localUpdated = localT.updatedAt || '';
       const remoteUpdated = remoteT.updatedAt || '';
       const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
 
       map.set(localT.id, {
         ...baseTicket,
+        status: finalStatus,
+        progressPercentage: finalProgress,
         messages: mergedMessages,
       });
     }
@@ -192,13 +215,15 @@ async function saveTickets(tickets, maxRetries = 3, deps = {}) {
         return true;
       }
 
-      // Tratamento de conflito 409 (CAS) com Reconciliação Granular (P0-02 & P0-04)
+      // Tratamento de conflito 409 (CAS) com Reconciliação Granular (P0-02 & P0-04 & P1)
       if (res.status === 409) {
         console.warn(`[WATCHDOG CAS] Conflito 409 detectado na tentativa ${attempt}. Reconciliando granularmente com banco remoto...`);
         const fresh = await fetchTickets(deps);
-        if (fresh && Array.isArray(fresh)) {
-          currentTickets = mergeTicketsGranular(fresh, currentTickets);
+        if (!fresh || !Array.isArray(fresh)) {
+          console.error(`[WATCHDOG CAS ABORT] Re-fetch falhou durante conflito 409 na tentativa ${attempt}. Abortando retry para evitar corrupção de snapshot.`);
+          return false;
         }
+        currentTickets = mergeTicketsGranular(fresh, currentTickets);
         continue;
       }
 
@@ -213,10 +238,10 @@ async function saveTickets(tickets, maxRetries = 3, deps = {}) {
   return false;
 }
 
-// P0-01 (Auditoria): Verificador de procedência de commit no GitHub
+// P0-A: Verificador estrito de procedência de commit no GitHub (Fail-closed; sem fallback por string)
 async function verifyCommit(tenant, commitSha, deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
-  const token = (deps.githubToken || GITHUB_TOKEN || '').trim();
+  const token = (deps.githubToken || GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
 
   if (!commitSha || typeof commitSha !== 'string' || !/^[0-9a-f]{7,40}$/i.test(commitSha)) {
     return { valid: false, reason: 'invalid_sha_format' };
@@ -230,36 +255,35 @@ async function verifyCommit(tenant, commitSha, deps = {}) {
     return await deps.verifyCommitFn(tenant, commitSha);
   }
 
-  if (token) {
-    try {
-      const url = `https://api.github.com/repos/${tenant.repo}/commits/${commitSha}`;
-      const res = await fetchFn(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'User-Agent': 'Antigravity-Watchdog',
-          'Accept': 'application/vnd.github+json'
-        }
-      });
+  // P0-A: Rejeitar qualquer comprovação fictícia ou offline. Consulta remota obrigatória.
+  if (!token) {
+    return { valid: false, reason: 'unverified_commit_remote_check_required_no_token' };
+  }
 
-      if (!res.ok) {
-        return { valid: false, reason: `commit_not_found_on_github_status_${res.status}` };
+  try {
+    const url = `https://api.github.com/repos/${tenant.repo}/commits/${commitSha}`;
+    const res = await fetchFn(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'User-Agent': 'Antigravity-Watchdog',
+        'Accept': 'application/vnd.github+json'
       }
-      const data = await res.json();
-      return { valid: true, fullSha: data.sha, message: data.commit?.message };
-    } catch (e) {
-      return { valid: false, reason: `github_api_error: ${e.message}` };
+    });
+
+    if (!res.ok) {
+      return { valid: false, reason: `commit_not_found_on_github_status_${res.status}` };
     }
+    const data = await res.json();
+    if (!data.sha || !data.sha.toLowerCase().startsWith(commitSha.toLowerCase())) {
+      return { valid: false, reason: 'commit_sha_mismatch' };
+    }
+    return { valid: true, fullSha: data.sha, message: data.commit?.message };
+  } catch (e) {
+    return { valid: false, reason: `github_api_error: ${e.message}` };
   }
-
-  // Se sem token de API configurado, aceita SHA completo de 40 dígitos em fallback offline seguro
-  if (commitSha.length === 40) {
-    return { valid: true, fullSha: commitSha };
-  }
-
-  return { valid: false, reason: 'unverified_short_sha_without_token' };
 }
 
-// P0-01 (Auditoria): Verificador de procedência e status READY do deployment na Vercel
+// P0-B: Verificador rigoroso de procedência e status READY do deployment na Vercel
 async function verifyDeployment(tenant, options = {}, deps = {}) {
   const fetchFn = deps.fetch || globalThis.fetch;
 
@@ -267,7 +291,13 @@ async function verifyDeployment(tenant, options = {}, deps = {}) {
     return await deps.verifyDeploymentFn(tenant, options);
   }
 
-  // 1. Verificação via Vercel Deployments API
+  // P0-B: Exigência obrigatória de commit SHA esperado
+  const expectedSha = options.expectedSha;
+  if (!expectedSha) {
+    return { ready: false, reason: 'missing_expected_commit_sha' };
+  }
+
+  // 1. Verificação via Vercel Deployments API com comprovação estrita
   if (options.deploymentId && (options.vercelToken || process.env.VERCEL_TOKEN)) {
     const vToken = (options.vercelToken || process.env.VERCEL_TOKEN).trim();
     try {
@@ -278,14 +308,24 @@ async function verifyDeployment(tenant, options = {}, deps = {}) {
       if (res.ok) {
         const d = await res.json();
         const state = d.status || d.readyState;
-        const isReady = state === 'READY';
-        const isProd = d.target === 'production' || !d.target;
-        const matchesCommit = !options.expectedSha || (d.meta?.githubCommitSha === options.expectedSha);
 
-        if (isReady && isProd && matchesCommit) {
-          return { ready: true, deploymentId: d.id, url: d.url };
+        // P0-B: Status deve ser estritamente READY
+        if (state !== 'READY') {
+          return { ready: false, reason: `deployment_status_${state}` };
         }
-        return { ready: false, reason: `deployment_status_${state}` };
+
+        // P0-B: Target deve ser estritamente 'production' (rejeita preview e target ausente)
+        if (d.target !== 'production') {
+          return { ready: false, reason: `invalid_target_${d.target || 'missing'}` };
+        }
+
+        // P0-B: Commit SHA do deployment deve corresponder estritamente ao commit aprovado
+        const deploySha = d.meta?.githubCommitSha || d.meta?.commitSha;
+        if (!deploySha || !deploySha.toLowerCase().startsWith(expectedSha.toLowerCase())) {
+          return { ready: false, reason: `commit_sha_mismatch_deployment_${deploySha || 'missing'}` };
+        }
+
+        return { ready: true, deploymentId: d.id, url: d.url, target: d.target, sha: deploySha };
       }
       return { ready: false, reason: `vercel_api_error_${res.status}` };
     } catch (e) {
@@ -293,13 +333,25 @@ async function verifyDeployment(tenant, options = {}, deps = {}) {
     }
   }
 
-  // 2. Verificação via Smoke Test / Health Check ativo no domínio
-  if (options.smokeTest) {
+  // 2. Verificação via Smoke Test Funcional Específico (P0-B: rejeita HTTP 200 genérico)
+  if (options.smokeTestSpecific) {
     try {
-      const targetUrl = `https://${tenant.domain}`;
+      const targetUrl = options.smokeTestSpecific.url || `https://${tenant.domain}/api/version`;
       const res = await fetchFn(targetUrl, { method: 'GET', cache: 'no-store' });
       if (res.ok) {
-        return { ready: true, method: 'smoke_test_ok', status: res.status };
+        if (typeof options.smokeTestSpecific.assertFn === 'function') {
+          const body = await res.text();
+          const passed = options.smokeTestSpecific.assertFn(res, body);
+          if (passed) {
+            return { ready: true, method: 'smoke_test_specific_verified', status: res.status };
+          }
+          return { ready: false, reason: 'smoke_test_assertion_failed' };
+        }
+        const serverSha = res.headers?.get?.('x-commit-sha') || res.headers?.get?.('x-version');
+        if (serverSha && serverSha.toLowerCase().startsWith(expectedSha.toLowerCase())) {
+          return { ready: true, method: 'smoke_test_commit_header_verified', status: res.status };
+        }
+        return { ready: false, reason: 'smoke_test_lacks_commit_provenance' };
       }
       return { ready: false, reason: `smoke_test_failed_status_${res.status}` };
     } catch (e) {
@@ -312,8 +364,8 @@ async function verifyDeployment(tenant, options = {}, deps = {}) {
     return await options.provenanceVerifier(tenant, options);
   }
 
-  // Rejeita simples flags booleanas sem identidade ou proveniência comprovada
-  return { ready: false, reason: 'unverified_deployment_provenance' };
+  // P0-B: Rejeita HTTP 200 genérico de domínio raiz e flags booleanas sem identidade
+  return { ready: false, reason: 'unverified_deployment_provenance_strict' };
 }
 
 async function processTicket(ticket, options = {}, deps = {}) {

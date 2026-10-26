@@ -48,6 +48,9 @@ r=await fetchSandboxTicketsFromGitHub({env,confirmed:true,fetchFn:mock([ticket],
 assert.equal(r.reason,'staging_read_failed');
 const source=readFileSync(new URL('./antigravity_watcher.js',import.meta.url),'utf8');
 const section=source.slice(source.indexOf("args.some(a => a.startsWith('--dispatch-approved-sbx='))"),source.indexOf("args.some(a => a.startsWith('--dispatch-ticket='))"));
-assert.ok(section.includes('fetchSandboxTicketsFromGitHub'));
+assert.ok(section.includes('oneShotPrivateSandbox'));
+assert.ok(!section.includes('fetchSandboxTicketsFromGitHub'));
 assert.ok(!section.includes('fetchTickets({}, {isManual:true})'));
+assert.ok(section.includes('verifyEvent:verifyTicketEventIntegrity'));
+assert.ok(section.includes('reserve:(kind)=>reserveExternalRequest(kind)'));
 console.log('✅ Ordem 060: staging remoto isolado, uma leitura, sem prod, com cota e fail-closed (mocks offline)');

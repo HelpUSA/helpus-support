@@ -760,7 +760,7 @@ export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Prom
         }
         let remoteTickets: Ticket[];
         try {
-          const decoded = Buffer.from(blob.data.content.replace(/\\s/g, ''), 'base64').toString('utf-8');
+          const decoded = Buffer.from(blob.data.content.replace(/\s/g, ''), 'base64').toString('utf-8');
           remoteTickets = JSON.parse(decoded);
           if (!Array.isArray(remoteTickets)) throw new Error('not_array');
         } catch {
@@ -1051,7 +1051,8 @@ export class TicketStore {
             merged.push(initTicket);
           }
         }
-        this.tickets = merged.sort(
+        // Read-side projection: raw GitHub root can lag behind signed terminal ledger.
+        this.tickets = merged.map(materializeSignedTicketLifecycle).sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
         try {

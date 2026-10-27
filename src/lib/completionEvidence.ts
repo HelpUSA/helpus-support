@@ -113,8 +113,14 @@ export function verifyTicketCompletionEvidence(
     return { ok: false, reason: 'report_hash_invalid', evidenceVerified: false };
   }
 
+  // Ordem 080: never grant completion from claimant-supplied fields alone.
+  // These values are shapes, NOT cryptographic proofs nor independent GitHub,
+  // Vercel, live URL or report observations. The production route MUST install
+  // genuine server-side verifiers and bind every result to ticket+command.
+  // Until implemented, fail-closed for EVERY apparently valid claim.
   return {
-    ok: true,
-    evidenceVerified: true,
+    ok: false,
+    reason: 'trusted_server_verification_unavailable',
+    evidenceVerified: false,
   };
 }

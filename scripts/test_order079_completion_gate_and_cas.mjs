@@ -141,12 +141,25 @@ const validEvidence = {
   console.log('✅ PASS: Rejeição estrita de relatório sem SHA-256 criptográfico de 64 caracteres');
 }
 
-// 8. Teste Positivo: Todas as evidências válidas
+// 8. Regressão P0: campos bem-formados, inclusive READY/HTTP200, NÃO bastam.
 {
   const res = verifyTicketCompletionEvidence(mockTicket, validEvidence);
-  assert.equal(res.ok, true);
-  assert.equal(res.evidenceVerified, true);
-  console.log('✅ PASS: Aprovação de evidência íntegra com vinculação completa');
+  assert.equal(res.ok, false);
+  assert.equal(res.reason, 'trusted_server_verification_unavailable');
+  assert.equal(res.evidenceVerified, false);
+  const forged = {
+    ...validEvidence,
+    commitSha: 'f'.repeat(40),
+    deploymentId: 'dpl_'+('a'.repeat(24)),
+    deploymentStatus: 'READY',
+    deploymentTarget: 'production',
+    smokeTest: {status:200,ok:true,url:'https://aidoctor.helpusbr.com'},
+    reportSha256: '0'.repeat(64)
+  };
+  const fake = verifyTicketCompletionEvidence(mockTicket, forged);
+  assert.equal(fake.ok, false);
+  assert.equal(fake.reason, 'trusted_server_verification_unavailable');
+  console.log('✅ PASS: format-only evidence is never sufficient; no verified resolver yet');
 }
 
 // 9. Teste de Imutabilidade e Anti-Regressão (100% -> 75%)

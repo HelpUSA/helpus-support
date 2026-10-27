@@ -64,6 +64,9 @@ export interface Message {
 
 export interface TicketContext {
   url?: string;
+  applicationUrl?: string;
+  component?: string;
+  sourcePath?: string;
   userEmail?: string;
   userName?: string;
   userAgent?: string;

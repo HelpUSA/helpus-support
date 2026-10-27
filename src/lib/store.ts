@@ -22,7 +22,8 @@ export const INITIAL_TICKETS: Ticket[] = [
     description: "Solicitação para remoção dos textos circulares com badges de CRM fictícios (CRM/SP, CRM/RJ, CRM/PR) na seção de depoimentos da aplicação AIDoctor (aidoctor.helpusbr.com), adequando a página às normas de publicidade médica do CFM.",
     category: "feature",
     priority: "high",
-    status: "pending_approval",
+    status: "resolved",
+    progressPercentage: 100,
     assignedTo: "HelpUS Master SuperAdmin",
     createdByEmail: "helpus.ecommerce@gmail.com",
     createdByName: "SuperAdmin HelpUS",
@@ -1343,6 +1344,7 @@ export class TicketStore {
       success: boolean;
       solutionMessage: string;
       error?: string;
+      evidence?: any;
     },
     options?: { deferSideEffects?: boolean }
   ): Ticket | undefined {
@@ -1764,6 +1766,7 @@ export class TicketStore {
       success: boolean;
       solutionMessage: string;
       error?: string;
+      evidence?: any;
     }
   ): Promise<Ticket | undefined> {
     // P0-B: Transação atômica com rollback do cache em memória

@@ -5,6 +5,7 @@ import { aiAutoCodingWorker } from '@/lib/aiWorker';
 import { getAutoResolutionDetails } from '@/lib/aiResolver';
 import { validateServerApiAccess, projectTicketForUser } from '@/lib/serverAuth';
 import { AUTHORIZED_SUPERADMIN_EMAILS } from '@/lib/auth';
+import { verifyTicketCompletionEvidence } from '@/lib/completionEvidence';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -120,9 +121,11 @@ export async function PATCH(
         }
       }
 
+      // Ordem 079: Nenhum progresso numerico (mesmo >= 100%) pode concluir o ticket sem os gates de prova.
+      const safePercentage = Math.min(99, Math.max(0, Number(body.percentage || 0)));
       const updated = await ticketStore.updateTicketProgress(
         id,
-        Number(body.percentage || 0),
+        safePercentage,
         body.stepMessage || 'Executando tarefa no Antigravity...'
       );
       if (!updated) {
@@ -200,7 +203,7 @@ export async function PATCH(
     }
 
     if (body.action === 'complete' || body.action === 'resolve') {
-      const isAuthorizedOperator = isSuperAdminCaller || auth.isSuperAdmin || auth.userRole === 'agent';
+      const isAuthorizedOperator = isSuperAdminCaller || auth.isSuperAdmin || auth.userRole === 'agent' || auth.isServiceWorker;
       if (!isAuthorizedOperator) {
         return NextResponse.json(
           { success: false, error: 'Operação negada: Permissão de operador ou SuperAdmin necessária para concluir/resolver chamados.' },
@@ -211,9 +214,24 @@ export async function PATCH(
       if (!existing) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
+
+      // Ordem 079: Gate de conclusao no BACKEND
+      const evidenceCheck = verifyTicketCompletionEvidence(existing, body.evidence);
+      if (!evidenceCheck.ok) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: `Conclusão negada: evidências auditáveis inválidas ou ausentes (${evidenceCheck.reason}).`,
+            reason: evidenceCheck.reason 
+          },
+          { status: 422, headers: ANTI_CACHE_HEADERS }
+        );
+      }
+
       const updated = await ticketStore.completeTicketProductionAsync(id, {
         success: true,
         solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
+        evidence: body.evidence,
       });
       if (!updated) {
         return NextResponse.json(

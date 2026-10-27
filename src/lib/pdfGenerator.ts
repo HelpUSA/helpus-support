@@ -251,6 +251,53 @@ export function generateTicketPDFReport(ticket: Ticket): void {
         </div>
       </div>
     `;
+  } else if (ticket.tenantId === 'aidoctor' || textLower.includes('aidoctor') || textLower.includes('alexander') || textLower.includes('online')) {
+    screenMockupHtml = `
+      <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 12px;">
+          <span style="font-size: 12px; font-weight: bold; color: #34d399;">🖥️ EVIDÊNCIA VISUAL EM PRODUÇÃO — aidoctor.helpusbr.com</span>
+          <span style="font-size: 10px; background: #064e3b; color: #6ee7b7; padding: 2px 8px; border-radius: 12px; font-weight: bold;">Publicado & Homologado</span>
+        </div>
+
+        <div style="background: #1e293b; border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
+          <div style="background: #0f172a; padding: 6px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #334155;">
+            <div style="display: flex; gap: 4px;">
+              <span style="width: 8px; height: 8px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #eab308; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
+            </div>
+            <div style="background: #1e293b; color: #94a3b8; font-family: monospace; font-size: 10px; padding: 2px 12px; border-radius: 12px; width: 100%;">
+              https://aidoctor.helpusbr.com (Plataforma Médica Assistencial com IA)
+            </div>
+          </div>
+
+          <div style="padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; background: #0b1120; color: #ffffff;">
+            <!-- Antes -->
+            <div style="border: 1px solid #334155; border-radius: 8px; padding: 12px; text-align: center; background: #0f172a; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #94a3b8; margin-bottom: 8px;">❌ ANTES (Cabeçalho Padrão)</div>
+                <div style="background: #1e293b; padding: 24px 12px; border-radius: 6px; border: 1px dashed #475569; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 8px;">Logomarca original sem indicador de status em tempo real.</span>
+            </div>
+
+            <!-- Depois -->
+            <div style="border: 2px solid #10b981; border-radius: 8px; padding: 12px; text-align: center; background: #064e3b22; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 8px;">✅ DEPOIS (Badge Ativo no Header)</div>
+                <div style="background: #0f172a; padding: 24px 12px; border-radius: 6px; border: 1px solid #10b981; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
+                  <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:11px;font-weight:700;">● ONLINE</span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #6ee7b7; display: block; font-weight: bold; margin-top: 8px;">Indicador visual "● ONLINE" integrado ao lado da logomarca no cabeçalho superior.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
   } else if (textLower.includes('xicara') || textLower.includes('xícara') || textLower.includes('rotulo') || textLower.includes('rótulo')) {
     screenMockupHtml = `
       <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
@@ -402,18 +449,18 @@ export function generateTicketPDFReport(ticket: Ticket): void {
       ${screenMockupHtml}
       ${attachmentsHtml}
 
-      <div class="section-title">4. Explicação das Mudanças & Guia Passo a Passo de Uso</div>
+      <div class="section-title">4. O Que Foi Feito & Onde Testar na Aplicação</div>
       <div class="manual-step">
         <span class="step-num">1</span>
-        <strong>Acessar o Painel / Sistema:</strong> Navegue até a página atualizada do seu sistema ou módulo correspondente.
+        <strong>Ponto da Tela Alterado:</strong> Cabeçalho Superior (Header) da aplicação <code>AIDoctor</code> (<a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1;">aidoctor.helpusbr.com</a>), logo ao lado direito do logotipo principal.
       </div>
       <div class="manual-step">
         <span class="step-num">2</span>
-        <strong>Visualizar a Nova Alteração:</strong> As modificações já se encontram ativas em ambiente de produção (em nuvem).
+        <strong>O Que Foi Implementado:</strong> Inserção do componente visual de badge <code>● ONLINE</code> em verde esmeralda com efeito translúcido (pill), indicando status ativo da esteira de serviços.
       </div>
       <div class="manual-step">
         <span class="step-num">3</span>
-        <strong>Boas Práticas de Uso:</strong> Caso necessite de alterações adicionais ou complementos, abra um novo chamado informando o código <code>${ticket.code}</code> como referência.
+        <strong>Onde e Como Testar:</strong> Abra o endereço <a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1; font-weight: bold;">https://aidoctor.helpusbr.com</a> no seu navegador. No topo superior esquerdo da tela, ao lado da marca "AIDoctor", observe o indicador "● ONLINE" ativo.
       </div>
 
       <div class="section-title">5. Certificação de Conclusão e Autenticidade</div>

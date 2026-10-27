@@ -577,6 +577,37 @@ export function reconcileTicketLifecycle(
   };
 }
 
+
+/**
+ * Ordem 077 — A raiz de um ticket é projeção de eventos com HMAC válido.
+ * A ordem de seq vence timestamp: um progresso stale (seq inferior)
+ * não pode reverter um evento terminal mais recente.
+ * Prova de execução/deploy é um gate SEPARADO desta projeção.
+ */
+export function materializeSignedTicketLifecycle(ticket: Ticket): Ticket {
+  if (!ticket || !Array.isArray(ticket.events) || ticket.events.length === 0) return ticket;
+  const verified = ticket.events.filter(evt =>
+    evt && evt.ticketId === ticket.id && evt.authorized === true &&
+    verifyTicketEventIntegrity(evt).valid);
+  if (!verified.length) return ticket;
+  const ordered = [...verified].sort((a, b) =>
+    ((a.seq || 0) - (b.seq || 0)) ||
+    ((a.timestamp || '').localeCompare(b.timestamp || '')) ||
+    ((a.id || '').localeCompare(b.id || '')));
+  const reconciled = reconcileTicketLifecycle(ticket, ticket, ordered);
+  return {
+    ...ticket,
+    status: reconciled.status,
+    progressPercentage: reconciled.progressPercentage,
+    reopenedAt: reconciled.reopenedAt || ticket.reopenedAt
+  };
+}
+export function prepareTicketsForCAS(remote: Ticket[], pending: Ticket[]): Ticket[] {
+  if (!Array.isArray(remote) || !Array.isArray(pending))
+    throw new Error('CAS_TICKETS_INVALID');
+  return mergeTicketsGranular(remote, pending).map(materializeSignedTicketLifecycle);
+}
+
 export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
   const map = new Map<string, Ticket>();
 
@@ -715,17 +746,33 @@ export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Prom
   while (attempt < maxRetries) {
     attempt++;
     try {
-      // 1. Obter SHA mais recente via CAS
+      // 1. Ler SHA e CONTEÚDO do mesmo blob imutável.
+      // Obter SHA recente e enviar um snapshot stale no primeiro PUT causa perda
+      // de eventos mesmo quando GitHub CAS aceita a escrita.
       const check = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
-      let latestSha: string | undefined = undefined;
-      if (check.status === 200 && check.data && check.data.sha) {
+      let latestSha: string | undefined;
+      if (check.status === 200 && /^[a-f0-9]{40}$/.test(check.data?.sha || '')) {
         latestSha = check.data.sha;
-        cloudSha = check.data.sha;
+        const blob = await githubApiRequest('GET', `/repos/${DB_REPO}/git/blobs/${latestSha}`);
+        if (blob.status !== 200 || blob.data?.sha !== latestSha ||
+            blob.data?.encoding !== 'base64' || typeof blob.data.content !== 'string') {
+          return { success: false, error: 'CAS_LATEST_BLOB_UNAVAILABLE' };
+        }
+        let remoteTickets: Ticket[];
+        try {
+          const decoded = Buffer.from(blob.data.content.replace(/\\s/g, ''), 'base64').toString('utf-8');
+          remoteTickets = JSON.parse(decoded);
+          if (!Array.isArray(remoteTickets)) throw new Error('not_array');
+        } catch {
+          return { success: false, error: 'CAS_LATEST_BLOB_INVALID' };
+        }
+        currentTickets = prepareTicketsForCAS(remoteTickets, currentTickets);
       } else if (check.status === 404) {
-        // Arquivo ainda não existe na branch, SHA inicial fica undefined
+        // Criação inicial; não aceitar elementos sem forma de array.
         latestSha = undefined;
+        currentTickets = prepareTicketsForCAS([], currentTickets);
       } else {
-        return { success: false, error: `Check SHA failed (${check.status}): ${check.raw}` };
+        return { success: false, error: `CAS_SHA_READ_FAILED_${check.status}` };
       }
 
       // 2. PUT com Compare-And-Swap (SHA)
@@ -750,7 +797,7 @@ export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Prom
           console.error(`[CAS ABORT] Re-fetch falhou durante conflito 409 na tentativa ${attempt}. Abortando retry para evitar corrupcao de dados.`);
           return { success: false, error: 'CAS_409_REFETCH_FAILED' };
         }
-        currentTickets = mergeTicketsGranular(remoteTickets, currentTickets);
+        currentTickets = prepareTicketsForCAS(remoteTickets, currentTickets);
         continue; // Retry com SHA atualizado e historico preservado
       }
 
@@ -1305,6 +1352,7 @@ export class TicketStore {
 
     if (workerResult.success) {
       ticket.status = 'resolved';
+      ticket.progressPercentage = 100; // raiz e evento terminal devem concordar
       ticket.messages.push({
         id: `msg-res-${Date.now()}`,
         ticketId: ticket.id,
@@ -1375,8 +1423,12 @@ export class TicketStore {
     const backupTickets = JSON.parse(JSON.stringify(this.tickets));
     const ticket = this.getTicketById(ticketId);
     if (!ticket) return undefined;
+    // Uma etapa de progresso nunca reabre um ticket terminal assinado.
+    const projected = materializeSignedTicketLifecycle(ticket);
+    if (projected.status === 'resolved' || projected.status === 'closed' ||
+        projected.status === 'rejected') return undefined;
 
-    ticket.progressPercentage = Math.min(100, Math.max(0, percentage));
+    ticket.progressPercentage = Math.min(99, Math.max(0, percentage));
     ticket.progressStep = stepMessage;
     ticket.updatedAt = new Date().toISOString();
 

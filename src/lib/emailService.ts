@@ -42,7 +42,12 @@ class EmailNotificationService {
   }
 
   async sendNewTicketEmail(ticket: Ticket): Promise<EmailLog> {
-    const recipients = [EMAIL_CONFIG.masterTarget, 'eduardojcmagalhaes@gmail.com', ticket.createdByEmail].filter(Boolean).join(', ');
+    const isEduardoTicket = ticket.tenantId === 'neuro.eduardomagalhaes' || ticket.createdByEmail?.toLowerCase() === 'eduardojcmagalhaes@gmail.com';
+    const recipientList = [EMAIL_CONFIG.masterTarget, ticket.createdByEmail];
+    if (isEduardoTicket) {
+      recipientList.push('eduardojcmagalhaes@gmail.com');
+    }
+    const recipients = Array.from(new Set(recipientList.filter(Boolean))).join(', ');
     const subject = `[HelpUS Support] 🔔 Nova Solicitação ${ticket.code} — ${ticket.tenantName}: ${ticket.title}`;
 
     const htmlBody = `
@@ -148,8 +153,8 @@ class EmailNotificationService {
             Acesse a aplicação atualizada ou baixe o laudo técnico completo em PDF:
           </p>
           <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
-            <a href="https://usmle.helpusbr.com" style="background-color: #4f46e5; color: #ffffff; padding: 10px 20px; font-weight: bold; border-radius: 8px; text-decoration: none; display: inline-block;">
-              🌐 Acessar USMLE Prep Suite
+            <a href="${ticket.contextData?.url || (ticket.tenantId === 'neuro.eduardomagalhaes' ? 'https://neuro.eduardomagalhaes.helpusbr.com' : 'https://support.helpusbr.com/portal')}" style="background-color: #4f46e5; color: #ffffff; padding: 10px 20px; font-weight: bold; border-radius: 8px; text-decoration: none; display: inline-block;">
+              🌐 Acessar ${ticket.tenantName || 'Aplicação'}
             </a>
             <a href="https://support.helpusbr.com/portal" style="background-color: #10b981; color: #ffffff; padding: 10px 20px; font-weight: bold; border-radius: 8px; text-decoration: none; display: inline-block;">
               📄 Baixar Laudo PDF no Suporte

@@ -2,6 +2,35 @@ export type TicketCategory = 'bug' | 'feature' | 'question' | 'support' | 'billi
 export type TicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TicketStatus = 'pending_approval' | 'new' | 'in_progress' | 'in_production' | 'waiting_client' | 'in_testing' | 'resolved' | 'rejected' | 'closed';
 
+export type TicketEventType =
+  | 'ticket_created'
+  | 'master_approved'
+  | 'production_step'
+  | 'deployment_ready'
+  | 'ticket_resolved'
+  | 'ticket_reopened_by_client'
+  | 'ticket_reset_by_master'
+  | 'ticket_rejected'
+  | 'ticket_cancelled';
+
+export interface TicketEvent {
+  id: string; // eventId
+  ticketId: string;
+  tenantId?: string; // cryptographically bound by computeEventPayload if present
+  type: TicketEventType;
+  actorEmail: string;
+  actorRole: 'master_superadmin' | 'superadmin' | 'tenant_admin' | 'client' | 'system_pipeline';
+  authorized: boolean;
+  progressPercentage: number;
+  status: TicketStatus;
+  note?: string;
+  metadata?: Record<string, any>;
+  timestamp: string; // ISO 8601
+  seq?: number;
+  idempotencyKey?: string;
+  signature?: string; // Assinatura HMAC de proveniência do servidor
+}
+
 export interface Tenant {
   id: string;
   name: string;
@@ -35,6 +64,9 @@ export interface Message {
 
 export interface TicketContext {
   url?: string;
+  applicationUrl?: string;
+  component?: string;
+  sourcePath?: string;
   userEmail?: string;
   userName?: string;
   userAgent?: string;
@@ -67,4 +99,7 @@ export interface Ticket {
   adminNotes?: string;
   progressPercentage?: number; // 0 to 100
   progressStep?: string; // Current step description
+  reopenedAt?: string;
+  solutionCommitSha?: string;
+  events?: TicketEvent[];
 }

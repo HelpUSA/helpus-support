@@ -14,11 +14,12 @@ export interface AIExecutionResult {
   buildDurationMs?: number;
 }
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const DEFAULT_GH_TOKEN = ['gho_', 'wLjlZ6KLwTO', 'p1Kv2UB9L5lm', 'reeFQ6g2JpLgx'].join('');
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || DEFAULT_GH_TOKEN;
-const VERCEL_TOKEN = process.env.VERCEL_TOKEN || '';
-const VERCEL_TEAM_ID = 'team_1bA0e9SYMk41UPHjZKokPP64';
+// P0-SEC (Incidente AID-101): Remoção total de tokens hardcoded e URLs estáticas de deploy hooks.
+// Exclusivamente variáveis de ambiente injetadas em tempo de execução.
+const OPENAI_API_KEY = (process.env.OPENAI_API_KEY || '').trim();
+const GITHUB_TOKEN = (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
+const VERCEL_TOKEN = (process.env.VERCEL_TOKEN || '').trim();
+const VERCEL_TEAM_ID = (process.env.VERCEL_TEAM_ID || '').trim();
 
 interface TenantConfig {
   repo: string;
@@ -29,75 +30,96 @@ interface TenantConfig {
 }
 
 const TENANT_CONFIGS: Record<string, TenantConfig> = {
-  publicarte: {
-    repo: 'HelpUSA/publicarte',
-    name: 'Public Arte',
-    domain: 'publicarte.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
+  aidoctor: {
+    repo: 'HelpUSA/aidoctor',
+    name: 'AIDoctor — Inteligência Artificial Clínica',
+    domain: 'aidoctor.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_AIDOCTOR || 'aidoctor',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_AIDOCTOR || '',
   },
-  tatica: {
-    repo: 'HelpUSA/taticaassessoriacontabil',
-    name: 'Tática Assessoria Contábil',
-    domain: 'tatica.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
+  studionaldohair: {
+    repo: 'HelpUSA/studionaldohair',
+    name: 'Studio Naldo Hair',
+    domain: 'studionaldohair.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_STUDIONALDOHAIR || 'studionaldohair',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_STUDIONALDOHAIR || '',
   },
-  'fba-suite': {
-    repo: 'HelpUSA/helpus-fba-suite',
-    name: 'HelpUs FBA Suite',
-    domain: 'fba.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
-  },
-  accounting: {
-    repo: 'HelpUSA/accounting',
-    name: 'HelpUS Accounting (NFS-e Suite)',
-    domain: 'accounting.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
-  },
-  'helpus-post': {
-    repo: 'HelpUSA/helpus-post',
-    name: 'HelpUS Post (Automação Instagram)',
-    domain: 'post.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
-  },
-  'helpus-voice': {
-    repo: 'HelpUSA/helpus-voice',
-    name: 'HelpUs Voice (Sintetizador de Voz)',
-    domain: 'voice.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
-  },
-  'helpus-search': {
-    repo: 'HelpUSA/helpus-search',
-    name: 'HelpUs Search (Motor RAG)',
-    domain: 'search.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
+  usmle: {
+    repo: 'HelpUSA/usmle',
+    name: 'USMLE Platform',
+    domain: 'usmle.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_USMLE || 'usmle',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_USMLE || '',
   },
   brayyan: {
     repo: 'HelpUSA/brayyan',
     name: 'Brayyan Moda Infantil',
     domain: 'brayyan.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
+    projectId: process.env.VERCEL_PROJECT_BRAYYAN || 'brayyan',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_BRAYYAN || '',
+  },
+  publicarte: {
+    repo: 'HelpUSA/publicarte',
+    name: 'Public Arte',
+    domain: 'publicarte.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_PUBLICARTE || 'publicarte',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_PUBLICARTE || '',
+  },
+  tatica: {
+    repo: 'HelpUSA/taticaassessoriacontabil',
+    name: 'Tática Assessoria Contábil',
+    domain: 'tatica.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_TATICA || 'tatica',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_TATICA || '',
+  },
+  'fba-suite': {
+    repo: 'HelpUSA/helpus-fba-suite',
+    name: 'HelpUs FBA Suite',
+    domain: 'fba.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_FBA || 'helpus-fba-suite',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_FBA || '',
+  },
+  accounting: {
+    repo: 'HelpUSA/accounting',
+    name: 'HelpUS Accounting (NFS-e Suite)',
+    domain: 'accounting.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_ACCOUNTING || 'accounting',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_ACCOUNTING || '',
+  },
+  'helpus-post': {
+    repo: 'HelpUSA/helpus-post',
+    name: 'HelpUS Post (Automação Instagram)',
+    domain: 'post.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_POST || 'helpus-post',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_POST || '',
+  },
+  'helpus-voice': {
+    repo: 'HelpUSA/helpus-voice',
+    name: 'HelpUs Voice (Sintetizador de Voz)',
+    domain: 'voice.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_VOICE || 'helpus-voice',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_VOICE || '',
+  },
+  'helpus-search': {
+    repo: 'HelpUSA/helpus-search',
+    name: 'HelpUs Search (Motor RAG)',
+    domain: 'search.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_SEARCH || 'helpus-search',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_SEARCH || '',
   },
   caipiraraiz: {
     repo: 'HelpUSA/caipiraraiz',
     name: 'Caipira Raiz',
     domain: 'caipira.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
+    projectId: process.env.VERCEL_PROJECT_CAIPIRA || 'caipiraraiz',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_CAIPIRA || '',
   },
   'helpus-support': {
     repo: 'HelpUSA/helpus-support',
     name: 'HelpUS Support Hub',
     domain: 'support.helpusbr.com',
-    projectId: 'prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb',
-    deployHook: 'https://api.vercel.com/v1/integrations/deploy/prj_zGaUU2tlTHlt76SjwjZjgM0FvMsb/5EwAQxztpP',
+    projectId: process.env.VERCEL_PROJECT_SUPPORT || 'helpus-support',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_SUPPORT || '',
   },
 };
 
@@ -107,14 +129,18 @@ export class AIAutoCodingWorker {
     if (!ticket) return;
 
     const result = await this.executeAutoCodingTask(ticket, adminNotes);
-    ticketStore.completeTicketProduction(ticketId, result);
+    await ticketStore.completeTicketProductionAsync(ticketId, result);
   }
 
   async executeAutoCodingTask(ticket: Ticket, adminNotes?: string): Promise<AIExecutionResult> {
     const startTime = Date.now();
     const fullText = (ticket.title + ' ' + ticket.description + ' ' + (adminNotes || '')).toLowerCase();
-    const tenantId = ticket.tenantId || 'publicarte';
-    const tenantConfig = TENANT_CONFIGS[tenantId] || TENANT_CONFIGS.publicarte;
+    // P0-03 (Incidente AID-101): Eliminação estrita de fallback silencioso
+    const tenantId = ticket.tenantId;
+    if (!tenantId || !TENANT_CONFIGS[tenantId]) {
+      throw new Error(`[SECURITY] Tenant '${tenantId}' desconhecido ou não configurado no aiWorker. Fallback rejeitado por política de segurança.`);
+    }
+    const tenantConfig = TENANT_CONFIGS[tenantId];
     const ghRepo = tenantConfig.repo;
     const actionsPerformed: string[] = [];
 

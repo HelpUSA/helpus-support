@@ -15,8 +15,16 @@ open_window_titles.txt
 *.env*
 *.backup
 
+# Local Runtime State & Caches
+helpus_tickets_cache_v2.json
+data/helpus_claims_ledger.json
+data/*.tmp*
+
 # HelpUSDev Control Center Local Transactional Store
 .helpusdev_control_center*
 *.bak
 *.tsbuildinfo
 portal_live_test.png
+
+.temp_build/
+.temp/

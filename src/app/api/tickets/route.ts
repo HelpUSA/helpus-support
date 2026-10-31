@@ -29,8 +29,35 @@ export async function GET(request: NextRequest) {
   let effectiveTenant: string | undefined;
 
   if (auth.isSuperAdmin) {
-    // SuperAdmin comprovado tem autorização para consultar 'all' ou tenant específico
+    // Apenas SuperAdmin autenticado pode consultar 'all' global irrestrito
     effectiveTenant = requestedTenant && requestedTenant !== 'all' ? requestedTenant : undefined;
+  } else if (auth.isServiceWorker) {
+    // Ordem 035: service_worker estritamente restrito aos tenants autorizados; proibida listagem global irrestrita
+    if (requestedTenant === 'all') {
+      return NextResponse.json(
+        { success: false, error: 'Acesso negado: service_worker não possui autorização para listagem global irrestrita.' },
+        { status: 403, headers: ANTI_CACHE_HEADERS }
+      );
+    }
+
+    if (requestedTenant) {
+      if (!auth.allowedTenantIds || !auth.allowedTenantIds.includes(requestedTenant)) {
+        return NextResponse.json(
+          { success: false, error: `Acesso negado: service_worker não possui autorização para consultar chamados do tenant '${requestedTenant}'.` },
+          { status: 403, headers: ANTI_CACHE_HEADERS }
+        );
+      }
+      effectiveTenant = requestedTenant;
+    } else {
+      if (auth.allowedTenantIds && auth.allowedTenantIds.length === 1 && auth.allowedTenantIds[0] !== 'all') {
+        effectiveTenant = auth.allowedTenantIds[0];
+      } else {
+        return NextResponse.json(
+          { success: false, error: 'Acesso negado: service_worker deve especificar um tenantId autorizado e não possui permissão para listagem global irrestrita.' },
+          { status: 403, headers: ANTI_CACHE_HEADERS }
+        );
+      }
+    }
   } else {
     // Usuários comuns ou administradores de cliente NUNCA podem consultar 'all'
     if (requestedTenant === 'all') {
@@ -73,6 +100,10 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    delete body.events;
+    if (body.ticketData) {
+      delete body.ticketData.events;
+    }
     const tenantHeader = request.headers.get('x-tenant-id');
 
     let tenantId = body.tenantId || tenantHeader || 'publicarte';
@@ -112,6 +143,13 @@ export async function POST(request: NextRequest) {
       attachments: body.attachments,
       clientTicketCount: body.clientTicketCount,
     } as any);
+
+    if (!newTicket) {
+      return NextResponse.json(
+        { success: false, error: 'Falha na persistência remota ao criar chamado na nuvem.' },
+        { status: 500, headers: ANTI_CACHE_HEADERS }
+      );
+    }
 
     return NextResponse.json({ success: true, data: projectTicketForUser(newTicket, auth.isSuperAdmin) }, { status: 201, headers: ANTI_CACHE_HEADERS });
   } catch (error: any) {

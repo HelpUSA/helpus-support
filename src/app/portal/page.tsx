@@ -30,6 +30,7 @@ import {
   Loader2,
   Building2,
   MessageSquare,
+  ExternalLink,
 } from 'lucide-react';
 import { Ticket, TicketStatus, TicketCategory, TicketPriority, Attachment, Message } from '@/types/ticket';
 import { AuthService, UserAccount, isAuthorizedSuperAdmin } from '@/lib/auth';
@@ -255,7 +256,7 @@ export default function ClientPortalPage() {
           const prevProgress = prevProgressRef.current.get(t.id);
 
           if (prevStatus && prevStatus !== t.status) {
-            const statusName = getStatusLabel(t.status);
+            const statusName = getStatusLabel(t.status, t.progressPercentage ?? 0);
             setStatusAlert(`✨ Notificação em Tempo Real: O chamado [${t.code}] foi atualizado para "${statusName}"!`);
             setTimeout(() => setStatusAlert(null), 6000);
           } else if (
@@ -471,7 +472,7 @@ export default function ClientPortalPage() {
 
         setIsApproveModalOpen(false);
         setAdminNotesInput('');
-        setStatusAlert(`⚡ Chamado [${updatedTicket.code}] Aprovado & ENTROU EM PRODUÇÃO! O robô autônomo está compilando o código e verificando o deploy na nuvem...`);
+        setStatusAlert(`✅ Chamado [${updatedTicket.code}] aprovado e persistido. Execução pendente de confirmação do operador local; nenhum deploy iniciado automaticamente.`);
         setTimeout(() => setStatusAlert(null), 8000);
       } else {
         setStatusAlert(`⚠️ Erro ao aprovar chamado: ${data.error || 'Falha no servidor'}`);
@@ -791,6 +792,11 @@ export default function ClientPortalPage() {
     return t.id === (user.tenantId || 'publicarte');
   });
 
+  const isCompletedTicket = (t: Ticket | null | undefined): boolean => {
+    if (!t) return false;
+    return (t.progressPercentage ?? 0) >= 100 || t.status === 'resolved' || t.status === 'closed';
+  };
+
   const filteredTickets = tickets.filter((t) => {
     const matchesSearch =
       t.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -799,15 +805,15 @@ export default function ClientPortalPage() {
     if (!matchesSearch) return false;
 
     if (statusFilterTab === 'pending') return t.status === 'pending_approval';
-    if (statusFilterTab === 'in_progress') return t.status === 'in_production' || t.status === 'in_progress' || t.status === 'in_testing';
-    if (statusFilterTab === 'resolved') return t.status === 'resolved';
+    if (statusFilterTab === 'in_progress') return (t.status === 'in_production' || t.status === 'in_progress' || t.status === 'in_testing') && !isCompletedTicket(t);
+    if (statusFilterTab === 'resolved') return isCompletedTicket(t);
     if (statusFilterTab === 'closed') return t.status === 'closed';
     return true;
   });
 
   const pendingCount = tickets.filter((t) => t.status === 'pending_approval').length;
-  const inProgressCount = tickets.filter((t) => t.status === 'in_production' || t.status === 'in_progress' || t.status === 'in_testing').length;
-  const resolvedCount = tickets.filter((t) => t.status === 'resolved' || t.status === 'closed').length;
+  const inProgressCount = tickets.filter((t) => (t.status === 'in_production' || t.status === 'in_progress' || t.status === 'in_testing') && !isCompletedTicket(t)).length;
+  const resolvedCount = tickets.filter((t) => isCompletedTicket(t)).length;
 
   const handleSendTicketEmail = async (ticket: Ticket) => {
     try {
@@ -831,7 +837,10 @@ export default function ClientPortalPage() {
     }
   };
 
-  const getStatusLabel = (status: TicketStatus) => {
+  const getStatusLabel = (status: TicketStatus, progress = 0) => {
+    if (progress >= 100 || status === 'resolved' || status === 'closed') {
+      return status === 'closed' ? 'Encerrado' : 'Concluído & Homologado';
+    }
     switch (status) {
       case 'pending_approval':
         return 'Aguardando Aprovação';
@@ -840,19 +849,20 @@ export default function ClientPortalPage() {
       case 'in_progress':
         return 'Em Atendimento';
       case 'in_production':
-        return 'Entrou em Produção';
+        return progress > 0 ? 'Execução em andamento' : 'Aprovado — Aguardando execução';
       case 'waiting_client':
         return 'Aguardando Você';
-      case 'resolved':
-        return 'Concluído';
       case 'rejected':
         return 'Recusado';
-      case 'closed':
-        return 'Cancelado pelo Cliente';
+      default:
+        return 'Concluído & Homologado';
     }
   };
 
-  const getStatusBadge = (status: TicketStatus) => {
+  const getStatusBadge = (status: TicketStatus, progress = 0) => {
+    if (progress >= 100 || status === 'resolved' || status === 'closed') {
+      return <span className="px-2.5 py-1 text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Concluído & Homologado</span>;
+    }
     switch (status) {
       case 'pending_approval':
         return <span className="px-2.5 py-1 text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-full flex items-center gap-1"><Clock className="w-3.5 h-3.5 animate-pulse" /> Aguardando Aprovação</span>;
@@ -861,15 +871,13 @@ export default function ClientPortalPage() {
       case 'in_progress':
         return <span className="px-2.5 py-1 text-xs font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full flex items-center gap-1 animate-pulse"><Sparkles className="w-3.5 h-3.5" /> Em Atendimento</span>;
       case 'in_production':
-        return <span className="px-2.5 py-1 text-xs font-bold bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded-full flex items-center gap-1 animate-pulse"><Cpu className="w-3.5 h-3.5 text-purple-400" /> Entrou em Produção</span>;
+        return <span className="px-2.5 py-1 text-xs font-bold bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded-full flex items-center gap-1 animate-pulse"><Clock className="w-3.5 h-3.5 text-purple-400" /> {progress > 0 ? "Execução em andamento" : "Aprovado — Aguardando execução"}</span>;
       case 'waiting_client':
         return <span className="px-2.5 py-1 text-xs font-bold bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-full flex items-center gap-1"><AlertCircle className="w-3.5 h-3.5" /> Aguardando Você</span>;
-      case 'resolved':
-        return <span className="px-2.5 py-1 text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Concluído</span>;
       case 'rejected':
         return <span className="px-2.5 py-1 text-xs font-bold bg-red-500/10 text-red-400 border border-red-500/20 rounded-full flex items-center gap-1"><XCircle className="w-3.5 h-3.5" /> Recusado</span>;
-      case 'closed':
-        return <span className="px-2.5 py-1 text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700 rounded-full flex items-center gap-1"><Trash2 className="w-3.5 h-3.5" /> Cancelado</span>;
+      default:
+        return <span className="px-2.5 py-1 text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Concluído & Homologado</span>;
     }
   };
 
@@ -1099,7 +1107,7 @@ export default function ClientPortalPage() {
                           </span>
                         )}
                       </div>
-                      {getStatusBadge(t.status)}
+                      {getStatusBadge(t.status, t.progressPercentage ?? 0)}
                     </div>
                     <h3 className="font-bold text-xs text-slate-100 group-hover:text-indigo-300 transition-colors line-clamp-1">
                       {t.title}
@@ -1308,7 +1316,7 @@ export default function ClientPortalPage() {
                     </>
                   )}
 
-                  {(selectedTicket.status === 'resolved' || selectedTicket.status === 'closed') && (
+                  {isCompletedTicket(selectedTicket) && (
                     <>
                       <button
                         onClick={() => generateTicketPDFReport(selectedTicket)}
@@ -1332,7 +1340,7 @@ export default function ClientPortalPage() {
                       </button>
                     </>
                   )}
-                  {getStatusBadge(selectedTicket.status)}
+                  {getStatusBadge(selectedTicket.status, selectedTicket.progressPercentage ?? 0)}
                 </div>
               </div>
 
@@ -1343,7 +1351,7 @@ export default function ClientPortalPage() {
                     <Clock className="w-3.5 h-3.5 text-indigo-400" /> Linha do Tempo do Atendimento:
                   </span>
                   <span className="text-[11px] font-mono text-indigo-300 font-semibold">
-                    {getStatusLabel(selectedTicket.status)}
+                    {getStatusLabel(selectedTicket.status, selectedTicket.progressPercentage ?? 0)}
                   </span>
                 </div>
 
@@ -1381,18 +1389,18 @@ export default function ClientPortalPage() {
                   {/* Step 3: Atendimento / IA */}
                   <div
                     className={`p-2 rounded-xl border ${
-                      selectedTicket.status === 'in_production' || selectedTicket.status === 'in_progress'
-                        ? 'bg-purple-500/10 border-purple-500/30 text-purple-400 animate-pulse'
-                        : selectedTicket.status === 'resolved' || selectedTicket.status === 'closed'
+                      isCompletedTicket(selectedTicket)
                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                        : selectedTicket.status === 'in_production' || selectedTicket.status === 'in_progress'
+                        ? 'bg-purple-500/10 border-purple-500/30 text-purple-400 animate-pulse'
                         : 'bg-slate-900 border-slate-800 text-slate-500'
                     }`}
                   >
                     <div className="flex items-center justify-center mb-0.5">
-                      {selectedTicket.status === 'in_production' || selectedTicket.status === 'in_progress' ? (
-                        <Cpu className="w-3.5 h-3.5 animate-spin" />
-                      ) : selectedTicket.status === 'resolved' || selectedTicket.status === 'closed' ? (
+                      {isCompletedTicket(selectedTicket) ? (
                         <CheckCircle2 className="w-3.5 h-3.5" />
+                      ) : selectedTicket.status === 'in_production' || selectedTicket.status === 'in_progress' ? (
+                        <Cpu className="w-3.5 h-3.5 animate-spin" />
                       ) : (
                         <Clock className="w-3.5 h-3.5" />
                       )}
@@ -1403,15 +1411,13 @@ export default function ClientPortalPage() {
                   {/* Step 4: Solucionado */}
                   <div
                     className={`p-2 rounded-xl border ${
-                      selectedTicket.status === 'resolved'
-                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 animate-bounce'
-                        : selectedTicket.status === 'closed'
+                      isCompletedTicket(selectedTicket)
                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                         : 'bg-slate-900 border-slate-800 text-slate-500'
                     }`}
                   >
                     <div className="flex items-center justify-center mb-0.5">
-                      {selectedTicket.status === 'resolved' || selectedTicket.status === 'closed' ? (
+                      {isCompletedTicket(selectedTicket) ? (
                         <CheckCircle2 className="w-3.5 h-3.5" />
                       ) : (
                         <Clock className="w-3.5 h-3.5" />
@@ -1423,13 +1429,13 @@ export default function ClientPortalPage() {
                   {/* Step 5: Encerrado */}
                   <div
                     className={`p-2 rounded-xl border ${
-                      selectedTicket.status === 'closed'
+                      isCompletedTicket(selectedTicket)
                         ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
                         : 'bg-slate-900 border-slate-800 text-slate-500'
                     }`}
                   >
                     <div className="flex items-center justify-center mb-0.5">
-                      {selectedTicket.status === 'closed' ? (
+                      {isCompletedTicket(selectedTicket) ? (
                         <CheckCircle2 className="w-3.5 h-3.5" />
                       ) : (
                         <Lock className="w-3.5 h-3.5" />
@@ -1440,63 +1446,62 @@ export default function ClientPortalPage() {
                 </div>
               </div>
 
-              {/* Client Resolution Confirmation Banner (When Resolved) */}
-              {selectedTicket.status === 'resolved' && (
-                <div className="p-4 bg-gradient-to-r from-emerald-950/70 via-teal-950/60 to-slate-950 border border-emerald-500/50 rounded-2xl space-y-3 shadow-lg">
+              {/* Concluded / Resolved Banner with Direct PDF & Access (No Second Confirmation Required) */}
+              {isCompletedTicket(selectedTicket) && (
+                <div className="p-5 bg-gradient-to-r from-emerald-950/80 via-slate-900 to-indigo-950/70 border border-emerald-500/50 rounded-2xl space-y-4 shadow-2xl relative overflow-hidden">
                   <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-xs font-bold text-emerald-300 flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-emerald-400" />
-                      🎉 A equipe técnica solucionou sua solicitação!
+                    <span className="text-sm font-extrabold text-emerald-300 flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-emerald-400" />
+                      🎉 Demanda Atendida & Homologada com Sucesso em Produção!
                     </span>
-                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2.5 py-0.5 rounded-full font-bold border border-emerald-500/30">
-                      Aguardando Sua Validação
+                    <span className="text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full font-bold border border-emerald-500/40 flex items-center gap-1.5 shadow-sm">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Concluído 100%
                     </span>
                   </div>
-                  <p className="text-xs text-slate-200 leading-relaxed">
-                    Por favor, valide se o ajuste atendeu sua expectativa. Caso esteja aprovado, clique em <strong>Confirmar Solução</strong> para encerrar o chamado. Se houver algum detalhe pendente, clique em <strong>Reabrir Chamado</strong>.
-                  </p>
-                  <div className="flex items-center gap-2.5 pt-1 flex-wrap">
-                    <button
-                      onClick={() => setIsCloseModalOpen(true)}
-                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-lg shadow-emerald-900/30 cursor-pointer transition-all"
-                    >
-                      <CheckCircle2 className="w-4 h-4" /> Confirmar Solução & Encerrar Chamado
-                    </button>
-                    <button
-                      onClick={() => setIsReopenModalOpen(true)}
-                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 hover:text-amber-200 font-bold rounded-xl text-xs flex items-center gap-1.5 border border-amber-500/30 cursor-pointer transition-all"
-                    >
-                      <RefreshCw className="w-4 h-4" /> Problema Persiste / Reabrir Chamado
-                    </button>
-                  </div>
-                </div>
-              )}
 
-              {/* Closed Banner with Reopen Option */}
-              {selectedTicket.status === 'closed' && (
-                <div className="p-3.5 bg-slate-900/60 border border-slate-700 rounded-2xl flex items-center justify-between text-xs flex-wrap gap-2">
-                  <div className="flex items-center gap-2 text-slate-300">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>Chamado validado e encerrado. Caso necessite de nova revisão, você pode reabri-lo.</span>
+                  <p className="text-xs text-slate-200 leading-relaxed">
+                    Todas as etapas foram concluídas pela esteira automatizada. O código foi validado, implantado e testado. O laudo técnico com o relatório de conformidade e as evidências de tela já está emitido e disponível para download.
+                  </p>
+
+                  <div className="flex items-center gap-3 pt-1 flex-wrap">
+                    <button
+                      onClick={() => generateTicketPDFReport(selectedTicket)}
+                      className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-indigo-900/40 cursor-pointer transition-all hover:scale-[1.02]"
+                    >
+                      <Printer className="w-4 h-4" /> Baixar PDF (Laudo Técnico Completo)
+                    </button>
+
+                    <button
+                      onClick={() => handleSendTicketEmail(selectedTicket)}
+                      disabled={sendingEmailTicketId === selectedTicket.id}
+                      className="px-4 py-2.5 bg-emerald-600/90 hover:bg-emerald-600 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-900/40 cursor-pointer transition-all disabled:opacity-50"
+                    >
+                      <Mail className="w-4 h-4" /> Enviar Laudo por E-mail
+                    </button>
+
+                    {selectedTicket.contextData?.applicationUrl && (
+                      <a
+                        href={selectedTicket.contextData.applicationUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 font-bold rounded-xl text-xs flex items-center gap-2 border border-emerald-500/30 shadow-lg cursor-pointer transition-all"
+                      >
+                        <ExternalLink className="w-4 h-4" /> Acessar Aplicação Atualizada
+                      </a>
+                    )}
                   </div>
-                  <button
-                    onClick={() => setIsReopenModalOpen(true)}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold border border-slate-700 flex items-center gap-1 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" /> Reabrir Chamado
-                  </button>
                 </div>
               )}
 
               {/* Master Decision Control Panel (Visible for HelpUS Master / SuperAdmin) */}
-              {isMasterUser && selectedTicket.status !== 'closed' && (
+              {isMasterUser && !isCompletedTicket(selectedTicket) && (
                 <div className="p-4 bg-gradient-to-r from-purple-900/60 to-indigo-900/60 border border-purple-500/50 rounded-2xl space-y-3 shadow-xl">
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold text-xs text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
                       👑 Painel de Aprovação & Gestão — HelpUS Master
                     </span>
                     <span className="text-[10px] text-purple-200 bg-purple-500/20 border border-purple-500/30 px-2 py-0.5 rounded font-mono font-bold">
-                      Status: {getStatusLabel(selectedTicket.status)}
+                      Status: {getStatusLabel(selectedTicket.status, selectedTicket.progressPercentage ?? 0)}
                     </span>
                   </div>
 
@@ -1511,7 +1516,7 @@ export default function ClientPortalPage() {
                           disabled={isActionLoading}
                           className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-2 transition-all cursor-pointer"
                         >
-                          <CheckCircle2 className="w-4 h-4" /> Aceitar & Executar Alterações (Deploy Vercel)
+                          <CheckCircle2 className="w-4 h-4" /> Aprovar solicitação (execução posterior)
                         </button>
 
                         <button
@@ -1528,7 +1533,7 @@ export default function ClientPortalPage() {
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <span className="text-xs font-bold text-purple-200 flex items-center gap-2">
                           <Cpu className="w-4 h-4 text-purple-400 animate-spin" />
-                          ⚡ Execução Antigravity em Andamento
+                          {(selectedTicket.progressPercentage ?? 0) > 0 ? '⚡ Execução Antigravity em Andamento' : '🕒 Aprovado — Aguardando início da execução'}
                         </span>
                         <span className="text-xs font-extrabold text-indigo-300 font-mono bg-indigo-500/20 px-2.5 py-1 rounded-lg border border-indigo-500/30">
                           {selectedTicket.progressPercentage ?? 0}% CONCLUÍDO

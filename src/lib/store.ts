@@ -2,99 +2,17 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import https from 'https';
-import { Ticket, Tenant, Message, Attachment } from '@/types/ticket';
+import { randomUUID } from 'node:crypto';
+import { Ticket, Tenant, Message, Attachment, TicketEvent } from '@/types/ticket';
 import { INITIAL_TENANTS } from '@/lib/tenants';
 import { notificationService } from '@/lib/notifications';
 import { emailService } from '@/lib/emailService';
 import { getAutoResolutionDetails } from '@/lib/aiResolver';
 import { aiAutoCodingWorker } from '@/lib/aiWorker';
+import { signTicketEvent, verifyTicketEventIntegrity, AUTHORIZED_SUPERADMIN_EMAILS } from '@/lib/serverAuth';
 export { INITIAL_TENANTS };
 
 export const INITIAL_TICKETS: Ticket[] = [
-  {
-    id: "tck-1792960000000",
-    tenantId: "aidoctor",
-    tenantName: "AIDoctor",
-    code: "AID-101",
-    title: "Retire o texto circulado na imagem em anexo",
-    description: "Solicitação para remoção dos textos circulares com badges de CRM fictícios (CRM/SP, CRM/RJ, CRM/PR) na seção de depoimentos da aplicação AIDoctor (aidoctor.helpusbr.com), adequando a página às normas de publicidade médica do CFM.",
-    category: "feature",
-    priority: "high",
-    status: "pending_approval",
-    assignedTo: "HelpUS Master SuperAdmin",
-    createdByEmail: "helpus.ecommerce@gmail.com",
-    createdByName: "SuperAdmin HelpUS",
-    contextData: {
-      url: "https://aidoctor.helpusbr.com",
-      userEmail: "helpus.ecommerce@gmail.com",
-      userName: "SuperAdmin HelpUS",
-      os: "Mobile Android / Chrome",
-      screen: "472x1024"
-    },
-    attachments: [
-      {
-        id: "att-aid-01",
-        name: "screenshot_crm_circulado.png",
-        url: "/uploads/screenshot_crm_circulado.png",
-        type: "image/png",
-        size: 142000
-      }
-    ],
-    messages: [
-      {
-        id: "msg-aid-001",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus.ecommerce@gmail.com",
-        senderName: "SuperAdmin HelpUS",
-        senderRole: "client",
-        isInternalNote: false,
-        content: "Retire o texto circulado na imagem em anexo (CRM/SP no card de depoimentos de médicos).",
-        createdAt: "2026-10-25T17:30:00.000Z"
-      },
-      {
-        id: "msg-aid-002",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus-master",
-        senderName: "HelpUS Master SuperAdmin",
-        senderRole: "agent",
-        isInternalNote: false,
-        content: "✅ Aprovação Concedida pelo Administrador HelpUS (HelpUS Master SuperAdmin). Autorizando envio para produção...",
-        createdAt: "2026-10-25T17:34:00.000Z"
-      },
-      {
-        id: "msg-aid-003",
-        ticketId: "tck-1792960000000",
-        senderId: "ci.cd@helpusbr.com",
-        senderName: "Pipeline de Produção Vercel",
-        senderRole: "agent",
-        isInternalNote: false,
-        content: "⚡ *[ENTROU EM PRODUÇÃO]*: O robô autônomo iniciou o processamento do código e o envio para a nuvem Vercel (AIDoctor). Compilação e deploy concluídos.",
-        createdAt: "2026-10-25T17:34:05.000Z"
-      },
-      {
-        id: "msg-aid-004",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus-master",
-        senderName: "HelpUS Master SuperAdmin",
-        senderRole: "agent",
-        isInternalNote: false,
-        content: "✨ *[CONCLUÍDO & RESOLVIDO]*: O texto circulado 'CRM/SP' e os placeholders 'CRM/RJ' e 'CRM/PR' foram completamente removidos dos cards de depoimentos da página https://aidoctor.helpusbr.com. Em seu lugar, foram inseridos ícones vetoriais neutros em SVG estilizados em dourado (#D4AF37), garantindo 100% de conformidade com a Resolução CFM nº 2.336/2023 de Publicidade Médica. Deploy realizado em produção na Vercel com sucesso.",
-        createdAt: "2026-10-25T17:53:00.000Z"
-      },
-      {
-        id: "msg-aid-005",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus.ecommerce@gmail.com",
-        senderName: "HelpUS Master SuperAdmin",
-        senderRole: "client",
-        isInternalNote: false,
-        content: "🔄 *Chamado Reaberto pelo Cliente (HelpUS Master SuperAdmin)*\n\nMotivo da Reabertura: a mensagem ainda continua.\n\n*Aguardando Nova Aprovação Master para Envio a Produção.*",
-        createdAt: "2026-10-25T19:25:00.000Z"
-      }
-    ],
-    createdAt: "2026-10-25T17:30:00.000Z",
-    updatedAt: "2026-10-25T17:53:00.000Z"
-  },
   {
     id: "tck-1791240000000",
     tenantId: "usmle",
@@ -371,15 +289,32 @@ export const INITIAL_TICKETS: Ticket[] = [
   }
 ];
 
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN || '';
-const DB_REPO = process.env.GITHUB_DB_REPO || 'HelpUSA/publicarte';
-const DB_PATH = process.env.GITHUB_DB_PATH || 'data/helpus_tickets.json';
+// P0-B (Ciclo 027): Assinatura canônica obrigatória de eventos de seed estáticos
+for (const t of INITIAL_TICKETS) {
+  if (Array.isArray(t.events)) {
+    for (const e of t.events) {
+      if (!e.signature) {
+        e.signature = signTicketEvent(e);
+      }
+    }
+  }
+}
+
+function getGitHubToken(): string {
+  return (process.env.SERVICE_WORKER_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || '').trim();
+}
+function getDbRepo(): string {
+  return process.env.HELPUS_DB_REPO || process.env.GITHUB_DB_REPO || 'HelpUSA/publicarte';
+}
+function getDbPath(): string {
+  return process.env.HELPUS_DB_PATH || process.env.GITHUB_DB_PATH || 'data/helpus_tickets.json';
+}
 
 let cloudSha: string | null = null;
 
 function githubApiRequest(method: string, path: string, body?: any): Promise<{ status: number; data: any; raw: string }> {
   return new Promise((resolve) => {
-    const token = (GITHUB_TOKEN || '').trim();
+    const token = getGitHubToken();
     const payload = body ? JSON.stringify(body) : undefined;
     const req = https.request(
       {
@@ -414,8 +349,161 @@ function githubApiRequest(method: string, path: string, body?: any): Promise<{ s
   });
 }
 
-async function fetchGitHubTickets(): Promise<Ticket[]> {
-  const token = (GITHUB_TOKEN || '').trim();
+// P0-A (Ciclo 023/024): Reconciliação causal baseada EXCLUSIVAMENTE em eventos estruturados com integridade criptográfica verificada
+// Mensagens de texto são apenas camada de apresentação; nunca autoridade de governança
+export function reconcileTicketLifecycle(
+  localT: Ticket,
+  remoteT: Ticket,
+  mergedEvents: TicketEvent[]
+): { status: any; progressPercentage: number; reopenedAt?: string } {
+  // 1. Inspecionar o log cronológico de trás para frente, aceitando unicamente eventos com proveniência e integridade comprovadas
+  if (Array.isArray(mergedEvents) && mergedEvents.length > 0) {
+    for (let i = mergedEvents.length - 1; i >= 0; i--) {
+      const evt = mergedEvents[i];
+      if (!evt || !evt.authorized) continue; // Ignora eventos não marcados
+
+      // P0-A: Verificação criptográfica rigorosa: desvio de relógio (timestamp futuro), segregação de papel e assinatura HMAC
+      const integrity = verifyTicketEventIntegrity(evt);
+      if (!integrity.valid) {
+        console.warn(`[EVENT INTEGRITY REJECTED] Evento ${evt.id} (${evt.type}) descartado: ${integrity.reason}`);
+        continue;
+      }
+
+      // Reabertura legítima comprovada pelo Master SuperAdmin ou solicitada pelo Cliente
+      if (evt.type === 'ticket_reset_by_master' || evt.type === 'ticket_reopened_by_client') {
+        return {
+          status: 'pending_approval',
+          progressPercentage: 0,
+          reopenedAt: evt.timestamp,
+        };
+      }
+
+      // Resolução / Conclusão comprovada em produção
+      if (evt.type === 'ticket_resolved') {
+        return {
+          status: 'resolved',
+          progressPercentage: 100,
+        };
+      }
+
+      // Etapas de produção comprovadas
+      if (evt.type === 'production_step') {
+        return {
+          status: 'in_production',
+          progressPercentage: evt.progressPercentage || 0,
+        };
+      }
+
+      // Aprovação inicial pelo Master SuperAdmin
+      if (evt.type === 'master_approved') {
+        return {
+          status: 'in_production',
+          progressPercentage: 0,
+        };
+      }
+
+      // Recusa ou Cancelamento
+      if (evt.type === 'ticket_rejected') {
+        return {
+          status: 'rejected',
+          progressPercentage: 0,
+        };
+      }
+
+      if (evt.type === 'ticket_cancelled') {
+        return {
+          status: 'closed',
+          progressPercentage: 0,
+        };
+      }
+    }
+  }
+
+  // 2. Fallback caso não existam eventos estruturados históricos válidos: versão com updatedAt mais recente
+  const localUpdated = localT.updatedAt || '';
+  const remoteUpdated = remoteT.updatedAt || '';
+  const newest = localUpdated >= remoteUpdated ? localT : remoteT;
+
+  return {
+    status: newest.status,
+    progressPercentage: newest.progressPercentage || 0,
+    reopenedAt: newest.reopenedAt,
+  };
+}
+
+export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
+  const map = new Map<string, Ticket>();
+
+  for (const t of remoteTickets) {
+    map.set(t.id, { ...t, messages: [...(t.messages || [])], events: [...(t.events || [])] });
+  }
+
+  for (const localT of localTickets) {
+    const remoteT = map.get(localT.id);
+    if (!remoteT) {
+      map.set(localT.id, { ...localT, messages: [...(localT.messages || [])], events: [...(localT.events || [])] });
+    } else {
+      // P0-04: Deduplicação e preservação estrita de mensagens concorrentes
+      const mergedMessagesMap = new Map<string, any>();
+      for (const m of (remoteT.messages || [])) {
+        const key = `${m.id || ''}_${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        mergedMessagesMap.set(key, m);
+      }
+      for (const m of (localT.messages || [])) {
+        const key = `${m.id || ''}_${m.createdAt || ''}_${m.senderId || ''}_${m.content || ''}`;
+        mergedMessagesMap.set(key, m);
+      }
+
+      const mergedMessages = Array.from(mergedMessagesMap.values()).sort((a, b) =>
+        (a.createdAt || '').localeCompare(b.createdAt || '')
+      );
+
+      // P0-A (Ciclo 023/024): Mesclar eventos estruturados filtrando integralmente eventos forjados/inválidos
+      const mergedEventsMap = new Map<string, TicketEvent>();
+      for (const e of (remoteT.events || [])) {
+        if (verifyTicketEventIntegrity(e).valid) {
+          const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+          mergedEventsMap.set(key, e);
+        }
+      }
+      for (const e of (localT.events || [])) {
+        if (verifyTicketEventIntegrity(e).valid) {
+          const key = e.id || e.idempotencyKey || `${e.type}_${e.timestamp}_${e.actorEmail}`;
+          mergedEventsMap.set(key, e);
+        }
+      }
+      const mergedEvents = Array.from(mergedEventsMap.values()).sort((a, b) => {
+        const timeDiff = (a.timestamp || '').localeCompare(b.timestamp || '');
+        if (timeDiff !== 0) return timeDiff;
+        return (a.seq || 0) - (b.seq || 0);
+      });
+
+      // Reconciliação causal baseada EXCLUSIVAMENTE em eventos estruturados autorizados
+      const lifecycle = reconcileTicketLifecycle(localT, remoteT, mergedEvents);
+      const localUpdated = localT.updatedAt || '';
+      const remoteUpdated = remoteT.updatedAt || '';
+      const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
+
+      map.set(localT.id, {
+        ...baseTicket,
+        status: lifecycle.status,
+        progressPercentage: lifecycle.progressPercentage,
+        reopenedAt: lifecycle.reopenedAt || baseTicket.reopenedAt,
+        messages: mergedMessages,
+        events: mergedEvents,
+      });
+    }
+  }
+
+  return Array.from(map.values());
+}
+
+export async function fetchGitHubTickets(): Promise<Ticket[] | null> {
+  const token = getGitHubToken();
+  const DB_REPO = getDbRepo();
+  const DB_PATH = getDbPath();
+  let fetchFailed = false;
+
   try {
     // 1. Obter metadata para atualizar cloudSha
     const meta = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
@@ -425,9 +513,14 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
         const content = Buffer.from(meta.data.content, 'base64').toString('utf-8');
         return JSON.parse(content);
       }
+    } else if (meta.status === 404) {
+      // 404 legítimo: base ainda não existe remotamente
+      return [];
+    } else if (meta.status >= 400) {
+      fetchFailed = true;
     }
 
-    // 2. Quando o arquivo excede 1MB, o GitHub omite 'content'. Buscar via Accept: application/vnd.github.raw
+    // 2. Se content foi omitido pelo tamanho, buscar raw
     const rawApiRes = await fetch(`https://api.github.com/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`, {
       headers: {
         'User-Agent': 'HelpUS-Support-Hub',
@@ -442,6 +535,7 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
     }
   } catch (err) {
     console.error('Error fetching tickets from GitHub API:', err);
+    fetchFailed = true;
   }
 
   try {
@@ -454,49 +548,87 @@ async function fetchGitHubTickets(): Promise<Ticket[]> {
     }
   } catch (err) {
     console.error('Error fetching tickets from raw GitHub:', err);
+    fetchFailed = true;
   }
-  return [];
+
+  // P1-02: Se houve falha de rede/API, retorna null para não mascarar falhas como base vazia
+  return fetchFailed ? null : [];
 }
 
-async function saveGitHubTickets(tickets: Ticket[]): Promise<{ success: boolean; error?: string }> {
-  if (!GITHUB_TOKEN || !GITHUB_TOKEN.trim()) {
+export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Promise<{ success: boolean; error?: string }> {
+  const token = getGitHubToken();
+  if (!token) {
     return { success: false, error: 'No GITHUB_TOKEN configured' };
   }
+  const DB_REPO = getDbRepo();
+  const DB_PATH = getDbPath();
 
-  try {
-    const check = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
-    let latestSha: string | undefined = undefined;
-    if (check.status === 200 && check.data && check.data.sha) {
-      latestSha = check.data.sha;
-      cloudSha = check.data.sha;
-    } else {
-      return { success: false, error: `Check SHA failed (${check.status}): ${check.raw}` };
-    }
+  let attempt = 0;
+  let currentTickets = [...tickets];
 
-    const putRes = await githubApiRequest('PUT', `/repos/${DB_REPO}/contents/${DB_PATH}`, {
-      message: 'db(sync): update tickets database in cloud',
-      content: Buffer.from(JSON.stringify(tickets, null, 2), 'utf-8').toString('base64'),
-      sha: latestSha || cloudSha || undefined,
-      branch: 'main',
-    });
+  while (attempt < maxRetries) {
+    attempt++;
+    try {
+      // 1. Obter SHA mais recente via CAS
+      const check = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
+      let latestSha: string | undefined = undefined;
+      if (check.status === 200 && check.data && check.data.sha) {
+        latestSha = check.data.sha;
+        cloudSha = check.data.sha;
+      } else if (check.status === 404) {
+        // Arquivo ainda não existe na branch, SHA inicial fica undefined
+        latestSha = undefined;
+      } else {
+        return { success: false, error: `Check SHA failed (${check.status}): ${check.raw}` };
+      }
 
-    if (putRes.status === 200 || putRes.status === 201) {
-      cloudSha = putRes.data?.content?.sha || cloudSha;
-      console.log('Successfully saved tickets to GitHub Cloud database!');
-      return { success: true };
-    } else {
+      // 2. PUT com Compare-And-Swap (SHA)
+      const putRes = await githubApiRequest('PUT', `/repos/${DB_REPO}/contents/${DB_PATH}`, {
+        message: `db(sync): update tickets database in cloud (CAS attempt ${attempt})`,
+        content: Buffer.from(JSON.stringify(currentTickets, null, 2), 'utf-8').toString('base64'),
+        sha: latestSha,
+        branch: 'main',
+      });
+
+      if (putRes.status === 200 || putRes.status === 201) {
+        cloudSha = putRes.data?.content?.sha || cloudSha;
+        console.log(`Successfully saved tickets to GitHub Cloud database on attempt ${attempt}!`);
+        return { success: true };
+      }
+
+      // P1-01: Tratamento explícito de Conflito 409 (CAS Concurrency)
+      if (putRes.status === 409) {
+        console.warn(`[CAS CONFLICT] 409 detectado na tentativa ${attempt}. Reconciliando granularmente base de tickets com versao remota...`);
+        const remoteTickets = await fetchGitHubTickets();
+        if (!remoteTickets || !Array.isArray(remoteTickets)) {
+          console.error(`[CAS ABORT] Re-fetch falhou durante conflito 409 na tentativa ${attempt}. Abortando retry para evitar corrupcao de dados.`);
+          return { success: false, error: 'CAS_409_REFETCH_FAILED' };
+        }
+        currentTickets = mergeTicketsGranular(remoteTickets, currentTickets);
+        continue; // Retry com SHA atualizado e historico preservado
+      }
+
       console.error(`GitHub API PUT failed status ${putRes.status}:`, putRes.raw);
       return { success: false, error: `GitHub PUT failed (${putRes.status}): ${putRes.raw}` };
+    } catch (err: any) {
+      console.error(`Exception during GitHub tickets save (attempt ${attempt}):`, err);
+      if (attempt >= maxRetries) {
+        return { success: false, error: err?.message || String(err) };
+      }
     }
-  } catch (err: any) {
-    console.error('Error saving tickets to GitHub:', err);
-    return { success: false, error: err?.message || String(err) };
   }
+
+  return { success: false, error: 'CAS_409_MAX_RETRIES_EXCEEDED' };
 }
 
 export class TicketStore {
   private tickets: Ticket[] = INITIAL_TICKETS;
   private tenants: Tenant[] = INITIAL_TENANTS;
+
+  // Ordem 033: Metodo de instancia para compatibilidade de testes e CAS
+  mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
+    return mergeTicketsGranular(remoteTickets, localTickets);
+  }
 
   constructor() {
     this.load();
@@ -655,19 +787,41 @@ export class TicketStore {
     return new Promise((resolve) => {
       this.writeQueue = this.writeQueue.then(async () => {
         try {
-          const filePath = this.getStoragePath();
-          const localOk = this.atomicSaveSync(filePath, this.tickets);
-
           let cloudResult: { success: boolean; error?: string } = { success: true };
-          if (GITHUB_TOKEN && GITHUB_TOKEN.trim()) {
+          const isServerlessOrProd = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.NODE_ENV === 'production');
+          const token = getGitHubToken();
+
+          // P0-C: Persistencia compartilhada duravel e obrigatoria em producao/Vercel
+          if (!token && isServerlessOrProd) {
+            console.error('[STORE CRITICAL] Backend persistente compartilhado (GITHUB_TOKEN) nao configurado em ambiente de producao/serverless. Rejeitando gravacao para evitar perda de dados.');
+            resolve({ success: false, error: 'SHARED_BACKEND_UNAVAILABLE_IN_PRODUCTION' });
+            return;
+          }
+
+          if (token) {
             try {
               cloudResult = await saveGitHubTickets(this.tickets);
             } catch (cloudErr: any) {
               cloudResult = { success: false, error: cloudErr?.message || String(cloudErr) };
             }
+            if (!cloudResult.success) {
+              console.error(`[STORE CRITICAL] Falha na persistencia compartilhada remota: ${cloudResult.error}. Operacao rejeitada para evitar falso sucesso.`);
+              // P1: Em caso de falha remota, o disco local NUNCA é poluído com mutação não confirmada
+              resolve({ success: false, error: cloudResult.error || 'Shared cloud persistence failed' });
+              return;
+            }
           }
 
-          resolve(cloudResult.success ? cloudResult : (localOk ? { success: true } : cloudResult));
+          // P1: A gravação em disco local ocorre SOMENTE após a confirmação de persistência na nuvem
+          const filePath = this.getStoragePath();
+          const localOk = this.atomicSaveSync(filePath, this.tickets);
+
+          if (!localOk && !token) {
+            resolve({ success: false, error: 'Local file persistence failed and no cloud token configured' });
+            return;
+          }
+
+          resolve({ success: true });
         } catch (err: any) {
           resolve({ success: false, error: err?.message || String(err) });
         }
@@ -694,8 +848,11 @@ export class TicketStore {
     if (typeof window === 'undefined') {
       try {
         const cloudTickets = await fetchGitHubTickets();
-        const baseTickets = (Array.isArray(cloudTickets) && cloudTickets.length > 0) ? cloudTickets : this.tickets;
-        const merged = [...baseTickets];
+        // P0-DURABLE (Ordem 031): Preservar estritamente o estado local (this.tickets) ao mesclar com cloudTickets.
+        // Impede que tickets locais ativos (ex: AID-101 em andamento) sejam sobrescritos por INITIAL_TICKETS.
+        const merged = (Array.isArray(cloudTickets) && cloudTickets.length > 0)
+          ? mergeTicketsGranular(cloudTickets, this.tickets)
+          : [...this.tickets];
         for (const initTicket of INITIAL_TICKETS) {
           if (!merged.some((t) => t.id === initTicket.id || t.code === initTicket.code)) {
             merged.push(initTicket);
@@ -746,7 +903,8 @@ export class TicketStore {
     createdByName: string;
     contextData?: Ticket['contextData'];
     attachments?: Attachment[];
-  }): Ticket {
+    clientTicketCount?: number;
+  }, options?: { deferSideEffects?: boolean }): Ticket {
     const tenant = this.getTenantById(data.tenantId) || {
       id: data.tenantId,
       name: data.tenantId === 'aidoctor' ? 'AIDoctor' : data.tenantId === 'studionaldohair' ? 'Studio Naldo Hair' : data.tenantId === 'neuro.eduardomagalhaes' ? 'Dr. Eduardo Magalhães Neurologista (Neuro)' : data.tenantId === 'tatica' ? 'Tática Assessoria Contábil' : data.tenantId === 'fba-suite' ? 'HelpUs FBA Suite' : 'Sistema Cliente',
@@ -800,11 +958,29 @@ export class TicketStore {
       updatedAt: new Date().toISOString(),
     };
 
-    this.tickets.unshift(newTicket);
-    this.save();
+    const createEvt: TicketEvent = {
+      id: `evt-create-${Date.now()}`,
+      ticketId: newTicket.id,
+      type: 'ticket_created',
+      actorEmail: data.createdByEmail,
+      actorRole: 'client',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'pending_approval',
+      note: data.title,
+      timestamp: new Date().toISOString(),
+      seq: 1,
+    };
+    createEvt.signature = signTicketEvent(createEvt);
+    newTicket.events = [createEvt];
 
-    // Trigger WhatsApp & Email Alerts for Approval
-    notificationService.notifyTicketCreated(newTicket);
+    this.tickets.unshift(newTicket);
+
+    // P0-B: Efeitos colaterais (notificações e save local) ocorrem somente se não postergados
+    if (!options?.deferSideEffects) {
+      this.save();
+      notificationService.notifyTicketCreated(newTicket);
+    }
 
     return newTicket;
   }
@@ -820,9 +996,21 @@ export class TicketStore {
     contextData?: Ticket['contextData'];
     attachments?: Attachment[];
     clientTicketCount?: number;
-  }): Promise<Ticket> {
-    const newTicket = this.createTicket(data);
-    await this.saveAsync();
+  }): Promise<Ticket | undefined> {
+    // P0-B: Transação atômica com backup prévio de memória
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
+    const newTicket = this.createTicket(data, { deferSideEffects: true });
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] createTicketAsync falhou ao persistir remotamente: ${saveRes.error}`);
+      // ROLLBACK ATÔMICO
+      this.tickets = backupTickets;
+      return undefined;
+    }
+
+    // PERSISTÊNCIA CONFIRMADA: Commit no cache local e emissão de side effects
+    this.save();
+    notificationService.notifyTicketCreated(newTicket);
     return newTicket;
   }
 
@@ -830,7 +1018,8 @@ export class TicketStore {
     ticketId: string,
     agentName: string = 'HelpUS Master',
     adminNotes?: string,
-    fallbackTicket?: Ticket
+    fallbackTicket?: Ticket,
+    options?: { deferSideEffects?: boolean; actorEmail?: string }
   ): Ticket | undefined {
     let ticket = this.getTicketById(ticketId);
     if (!ticket && fallbackTicket) {
@@ -851,7 +1040,7 @@ export class TicketStore {
     ticket.updatedAt = new Date().toISOString();
 
     // 1. Approval message with optional admin notes
-    let approvalContent = `✅ Aprovação Concedida pelo Administrador HelpUS (${agentName}). Autorizando envio para produção...`;
+    let approvalContent = `✅ Aprovação registrada pelo Administrador HelpUS (${agentName}). A execução ainda não foi iniciada.`;
     if (adminNotes && adminNotes.trim()) {
       approvalContent += `\n\n📝 *[INSTRUÇÕES ADICIONAIS DA GESTÃO]*:\n${adminNotes.trim()}`;
     }
@@ -867,10 +1056,10 @@ export class TicketStore {
       createdAt: new Date().toISOString(),
     });
 
-    // 2. Production step: ENTROU EM PRODUÇÃO (status = in_production)
+    // Legacy in_production status means approved/queued at 0%; actual execution requires dispatch acknowledgement.
     ticket.status = 'in_production';
     ticket.progressPercentage = 0;
-    ticket.progressStep = '⚡ Entrada em Produção autorizada. Robô autônomo aguardando execução...';
+    ticket.progressStep = 'Aprovação registrada. Aguardando confirmação de início pelo operador local.';
     ticket.messages.push({
       id: `msg-prod-${Date.now() + 1}`,
       ticketId: ticket.id,
@@ -878,18 +1067,41 @@ export class TicketStore {
       senderName: 'Pipeline de Produção Vercel',
       senderRole: 'agent',
       isInternalNote: false,
-      content: `⚡ *[ENTROU EM PRODUÇÃO]*: O robô autônomo iniciou o processamento do código e o envio para a nuvem Vercel (${ticket.tenantName || 'Public Arte'}). Acompanhe o progresso da compilação e verificação de deploy...`,
+      content: `🕒 *[APROVAÇÃO REGISTRADA]*: Chamado autorizado e aguardando despacho controlado para execução local (${ticket.tenantName || 'Public Arte'}). Nenhum build ou deploy é iniciado automaticamente pela aprovação.`,
       createdAt: new Date().toISOString(),
     });
 
-    // Save intermediate status "in_production" immediately to persistent storage
-    this.save();
+    const approvalEventId = `evt-appr-${randomUUID()}`;
+    const apprEvt: TicketEvent = {
+      id: approvalEventId,
+      ticketId: ticket.id,
+      tenantId: ticket.tenantId,
+      // Transactional outbox: signed, immutable job identity in the same persisted ticket JSON.
+      // NO dispatch occurs here; downstream Windows pull requires separate authority and ACK.
+      idempotencyKey: `helpus-approval-outbox-v1:${ticket.id}:${approvalEventId}`,
+      type: 'master_approved',
+      actorEmail: options?.actorEmail || 'master.superadmin@helpusbr.com',
+      actorRole: 'master_superadmin',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'in_production',
+      note: `Aprovação registrada pelo Administrador HelpUS (${agentName}); aguardando despacho de execução.`,
+      timestamp: new Date().toISOString(),
+      seq: (ticket.events?.length || 0) + 1,
+    };
+    apprEvt.signature = signTicketEvent(apprEvt);
 
-    // Notify stakeholders that ticket has ENTERED production
-    notificationService.notifyTicketUpdated(
-      ticket,
-      `⚡ Solicitação Aprovada! O chamado [${ticket.code}] ENTROU EM PRODUÇÃO e o robô está realizando os deploys na nuvem.`
-    );
+    ticket.events = ticket.events || [];
+    ticket.events.push(apprEvt);
+
+    // P0-B: Efeitos colaterais ocorrem unicamente se não postergados pelo chamador async
+    if (!options?.deferSideEffects) {
+      this.save();
+      notificationService.notifyTicketUpdated(
+        ticket,
+        `✅ Solicitação [${ticket.code}] aprovada e aguardando início de execução confirmado.`
+      );
+    }
 
     return ticket;
   }
@@ -898,13 +1110,36 @@ export class TicketStore {
     ticketId: string,
     agentName: string = 'HelpUS Master',
     adminNotes?: string,
-    fallbackTicket?: Ticket
+    fallbackTicket?: Ticket,
+    actorEmail?: string
   ): Promise<{ ticket?: Ticket; cloudSaveResult?: { success: boolean; error?: string } }> {
-    const ticket = this.startTicketProduction(ticketId, agentName, adminNotes, fallbackTicket);
-    let cloudSaveResult;
-    if (ticket) {
-      cloudSaveResult = await this.saveAsync();
+    // P0-B: Transação atômica com rollback do cache em memória em falha remota
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
+
+    const ticket = this.startTicketProduction(ticketId, agentName, adminNotes, fallbackTicket, {
+      deferSideEffects: true,
+      actorEmail: actorEmail || 'master.superadmin@helpusbr.com',
+    });
+
+    if (!ticket) {
+      return { ticket: undefined, cloudSaveResult: { success: false, error: 'Ticket não encontrado' } };
     }
+
+    const cloudSaveResult = await this.saveAsync();
+    if (!cloudSaveResult.success) {
+      console.error(`[STORE CRITICAL] startTicketProductionAsync falhou ao persistir remotamente: ${cloudSaveResult.error}`);
+      // ROLLBACK ATÔMICO DO CACHE EM MEMÓRIA
+      this.tickets = backupTickets;
+      return { ticket: undefined, cloudSaveResult };
+    }
+
+    // PERSISTÊNCIA CONFIRMADA: Atualiza arquivo local e dispara notificações
+    this.save();
+    notificationService.notifyTicketUpdated(
+      ticket,
+      `✅ Solicitação [${ticket.code}] aprovada e aguardando início de execução confirmado.`
+    );
+
     return { ticket, cloudSaveResult };
   }
 
@@ -914,7 +1149,8 @@ export class TicketStore {
       success: boolean;
       solutionMessage: string;
       error?: string;
-    }
+    },
+    options?: { deferSideEffects?: boolean }
   ): Ticket | undefined {
     const ticket = this.getTicketById(ticketId);
     if (!ticket) return undefined;
@@ -934,12 +1170,31 @@ export class TicketStore {
         createdAt: new Date().toISOString(),
       });
 
-      this.save();
+      const resEvt: TicketEvent = {
+        id: `evt-res-${Date.now()}`,
+        ticketId: ticket.id,
+        type: 'ticket_resolved',
+        actorEmail: 'ci.cd@helpusbr.com',
+        actorRole: 'system_pipeline',
+        authorized: true,
+        progressPercentage: 100,
+        status: 'resolved',
+        note: workerResult.solutionMessage,
+        timestamp: new Date().toISOString(),
+        seq: (ticket.events?.length || 0) + 1,
+      };
+      resEvt.signature = signTicketEvent(resEvt);
 
-      notificationService.notifyTicketUpdated(
-        ticket,
-        `🎉 Solicitação [${ticket.code}] Aprovada e SOLUCIONADA/CONCLUÍDA com Sucesso no Sistema!`
-      );
+      ticket.events = ticket.events || [];
+      ticket.events.push(resEvt);
+
+      if (!options?.deferSideEffects) {
+        this.save();
+        notificationService.notifyTicketUpdated(
+          ticket,
+          `🎉 Solicitação [${ticket.code}] Aprovada e SOLUCIONADA/CONCLUÍDA com Sucesso no Sistema!`
+        );
+      }
     } else {
       ticket.status = 'in_progress';
       ticket.messages.push({
@@ -953,12 +1208,13 @@ export class TicketStore {
         createdAt: new Date().toISOString(),
       });
 
-      this.save();
-
-      notificationService.notifyTicketUpdated(
-        ticket,
-        `⚠️ Alerta de Erro de Implantação no Chamado [${ticket.code}]. Retornado para Em Atendimento.`
-      );
+      if (!options?.deferSideEffects) {
+        this.save();
+        notificationService.notifyTicketUpdated(
+          ticket,
+          `⚠️ Alerta de Erro de Implantação no Chamado [${ticket.code}]. Retornado para Em Atendimento.`
+        );
+      }
     }
 
     return ticket;
@@ -969,6 +1225,8 @@ export class TicketStore {
     percentage: number,
     stepMessage: string
   ): Promise<Ticket | undefined> {
+    // Snapshot BEFORE mutations: restore the original ticket if shared persistence fails.
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
     const ticket = this.getTicketById(ticketId);
     if (!ticket) return undefined;
 
@@ -990,16 +1248,45 @@ export class TicketStore {
       });
     }
 
-    await this.saveAsync();
+    const prgEvt: TicketEvent = {
+      id: `evt-prg-${Date.now()}-${percentage}`,
+      ticketId: ticket.id,
+      type: 'production_step',
+      actorEmail: 'ci.cd@helpusbr.com',
+      actorRole: 'system_pipeline',
+      authorized: true,
+      progressPercentage: ticket.progressPercentage,
+      status: ticket.status,
+      note: stepMessage,
+      timestamp: new Date().toISOString(),
+      seq: (ticket.events?.length || 0) + 1,
+    };
+    prgEvt.signature = signTicketEvent(prgEvt);
+
+    ticket.events = ticket.events || [];
+    ticket.events.push(prgEvt);
+
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] updateTicketProgress falhou ao persistir remotamente: ${saveRes.error}`);
+      // ROLLBACK ATÔMICO
+      this.tickets = backupTickets;
+      return undefined;
+    }
+    this.save();
     return ticket;
   }
 
-  async resetTicket(ticketId: string): Promise<Ticket | undefined> {
+  async resetTicket(ticketId: string, actorEmail?: string): Promise<Ticket | undefined> {
+    // P0-B: Backup prévio para garantia de rollback atômico em memória
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
+
     let ticket = this.tickets.find((t) => t.id === ticketId || t.code === ticketId);
     if (!ticket) {
       ticket = INITIAL_TICKETS.find((t) => t.id === ticketId || t.code === ticketId);
       if (ticket) {
-        this.tickets.unshift(ticket);
+        this.tickets.unshift(JSON.parse(JSON.stringify(ticket)));
+        ticket = this.tickets[0];
       }
     }
     if (!ticket) return undefined;
@@ -1008,20 +1295,49 @@ export class TicketStore {
     ticket.progressPercentage = 0;
     delete ticket.progressStep;
     ticket.updatedAt = new Date().toISOString();
-    ticket.messages = [
-      {
-        id: "msg-1791048000000",
-        ticketId: ticket.id,
-        senderId: ticket.createdByEmail || "eduardojcmagalhaes@gmail.com",
-        senderName: ticket.createdByName || "Eduardo Magalhães (Neuro)",
-        senderRole: "client",
-        isInternalNote: false,
-        content: ticket.description,
-        attachments: [],
-        createdAt: ticket.createdAt || "2026-10-03T23:01:51.000Z"
-      }
-    ];
-    await this.saveAsync();
+
+    if (!Array.isArray(ticket.messages)) {
+      ticket.messages = [];
+    }
+    ticket.messages.push({
+      id: `msg-reset-${Date.now()}`,
+      ticketId: ticket.id,
+      senderId: actorEmail || "master.superadmin@helpusbr.com",
+      senderName: "Master SuperAdmin (HelpUS)",
+      senderRole: "system",
+      isInternalNote: true,
+      content: "🔄 Chamado retornado para 'pending_approval' pelo Master SuperAdmin. Todo o histórico anterior foi integralmente preservado.",
+      attachments: [],
+      createdAt: new Date().toISOString()
+    });
+
+    const resetEvt: TicketEvent = {
+      id: `evt-reset-${Date.now()}`,
+      ticketId: ticket.id,
+      type: 'ticket_reset_by_master',
+      actorEmail: actorEmail || 'master.superadmin@helpusbr.com',
+      actorRole: 'master_superadmin',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'pending_approval',
+      note: "Chamado retornado para 'pending_approval' pelo Master SuperAdmin.",
+      timestamp: new Date().toISOString(),
+      seq: (ticket.events?.length || 0) + 1,
+    };
+    resetEvt.signature = signTicketEvent(resetEvt);
+
+    ticket.events = ticket.events || [];
+    ticket.events.push(resetEvt);
+
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] resetTicket falhou ao persistir remotamente: ${saveRes.error}`);
+      // P0-B: ROLLBACK ATÔMICO DO CACHE EM MEMÓRIA
+      this.tickets = backupTickets;
+      return undefined;
+    }
+
+    this.save();
     return ticket;
   }
 
@@ -1039,7 +1355,8 @@ export class TicketStore {
     ticketId: string,
     rejectionReason: string,
     agentName: string = 'HelpUS Master',
-    fallbackTicket?: Ticket
+    fallbackTicket?: Ticket,
+    options?: { deferSideEffects?: boolean; actorEmail?: string }
   ): Ticket | undefined {
     let ticket = this.getTicketById(ticketId);
     if (!ticket && fallbackTicket) {
@@ -1065,10 +1382,28 @@ export class TicketStore {
       createdAt: new Date().toISOString(),
     });
 
-    this.save();
+    const rejEvt: TicketEvent = {
+      id: `evt-rej-${Date.now()}`,
+      ticketId: ticket.id,
+      type: 'ticket_rejected',
+      actorEmail: options?.actorEmail || 'master.superadmin@helpusbr.com',
+      actorRole: 'master_superadmin',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'rejected',
+      note: rejectionReason,
+      timestamp: new Date().toISOString(),
+      seq: (ticket.events?.length || 0) + 1,
+    };
+    rejEvt.signature = signTicketEvent(rejEvt);
 
-    // Trigger WhatsApp/Email notification of rejection
-    notificationService.notifyTicketUpdated(ticket, rejectMessageContent);
+    ticket.events = ticket.events || [];
+    ticket.events.push(rejEvt);
+
+    if (!options?.deferSideEffects) {
+      this.save();
+      notificationService.notifyTicketUpdated(ticket, rejectMessageContent);
+    }
 
     return ticket;
   }
@@ -1232,9 +1567,31 @@ export class TicketStore {
       error?: string;
     }
   ): Promise<Ticket | undefined> {
-    const ticket = this.completeTicketProduction(ticketId, workerResult);
-    if (ticket) {
-      await this.saveAsync();
+    // P0-B: Transação atômica com rollback do cache em memória
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
+    const ticket = this.completeTicketProduction(ticketId, workerResult, { deferSideEffects: true });
+    if (!ticket) return undefined;
+
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] completeTicketProductionAsync falhou ao persistir remotamente: ${saveRes.error}`);
+      // ROLLBACK ATÔMICO
+      this.tickets = backupTickets;
+      return undefined;
+    }
+
+    // PERSISTÊNCIA CONFIRMADA: Commit no cache local e envio de notificação
+    this.save();
+    if (workerResult.success) {
+      notificationService.notifyTicketUpdated(
+        ticket,
+        `🎉 Solicitação [${ticket.code}] Aprovada e SOLUCIONADA/CONCLUÍDA com Sucesso no Sistema!`
+      );
+    } else {
+      notificationService.notifyTicketUpdated(
+        ticket,
+        `⚠️ Alerta de Erro de Implantação no Chamado [${ticket.code}]. Retornado para Em Atendimento.`
+      );
     }
     return ticket;
   }
@@ -1243,12 +1600,26 @@ export class TicketStore {
     ticketId: string,
     rejectionReason: string,
     agentName: string = 'HelpUS Master',
-    fallbackTicket?: Ticket
+    fallbackTicket?: Ticket,
+    actorEmail?: string
   ): Promise<Ticket | undefined> {
-    const ticket = this.rejectTicket(ticketId, rejectionReason, agentName, fallbackTicket);
-    if (ticket) {
-      await this.saveAsync();
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
+    const ticket = this.rejectTicket(ticketId, rejectionReason, agentName, fallbackTicket, {
+      deferSideEffects: true,
+      actorEmail: actorEmail || 'master.superadmin@helpusbr.com',
+    });
+    if (!ticket) return undefined;
+
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] rejectTicketAsync falhou ao persistir remotamente: ${saveRes.error}`);
+      // ROLLBACK ATÔMICO
+      this.tickets = backupTickets;
+      return undefined;
     }
+
+    this.save();
+    notificationService.notifyTicketUpdated(ticket, `❌ *Solicitação Recusada pelo Administrador HelpUS (${agentName})*\n\n**Motivo da Recusa:**\n${rejectionReason}`);
     return ticket;
   }
 
@@ -1334,9 +1705,14 @@ export class TicketStore {
     return ticket;
   }
 
-  async reopenTicketAsync(id: string, reason: string, reopenedByName?: string): Promise<Ticket | undefined> {
+  async reopenTicketAsync(id: string, reason: string, reopenedByName?: string, actorEmail?: string): Promise<Ticket | undefined> {
+    // P0-B: Backup prévio para garantia de rollback atômico em memória
+    const backupTickets = JSON.parse(JSON.stringify(this.tickets));
+
     const ticket = this.getTicketById(id);
     if (!ticket) return undefined;
+
+    const callerEmail = actorEmail || ticket.createdByEmail;
 
     ticket.status = 'pending_approval';
     ticket.progressPercentage = 0;
@@ -1348,7 +1724,7 @@ export class TicketStore {
     ticket.messages.push({
       id: `msg-${Date.now()}`,
       ticketId: ticket.id,
-      senderId: ticket.createdByEmail,
+      senderId: callerEmail,
       senderName: reopenedByName || 'Cliente',
       senderRole: 'client',
       isInternalNote: false,
@@ -1356,7 +1732,33 @@ export class TicketStore {
       createdAt: new Date().toISOString(),
     });
 
-    await this.saveAsync();
+    const reopenEvt: TicketEvent = {
+      id: `evt-reopen-${Date.now()}`,
+      ticketId: ticket.id,
+      type: 'ticket_reopened_by_client',
+      actorEmail: callerEmail,
+      actorRole: 'client',
+      authorized: true,
+      progressPercentage: 0,
+      status: 'pending_approval',
+      note: reason,
+      timestamp: new Date().toISOString(),
+      seq: (ticket.events?.length || 0) + 1,
+    };
+    reopenEvt.signature = signTicketEvent(reopenEvt);
+
+    ticket.events = ticket.events || [];
+    ticket.events.push(reopenEvt);
+
+    const saveRes = await this.saveAsync();
+    if (!saveRes.success) {
+      console.error(`[STORE CRITICAL] reopenTicketAsync falhou ao persistir remotamente: ${saveRes.error}`);
+      // P0-B: ROLLBACK ATÔMICO DO CACHE EM MEMÓRIA
+      this.tickets = backupTickets;
+      return undefined;
+    }
+
+    this.save();
     return ticket;
   }
 }

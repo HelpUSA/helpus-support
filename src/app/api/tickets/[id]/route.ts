@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse, after } from 'next/server';
-import { ticketStore } from '@/lib/store';
+import { ticketStore, INITIAL_TICKETS, fetchGitHubTickets } from '@/lib/store';
+import { checkDurableApprovalSource } from '@/lib/approvalPersistence';
 import { aiAutoCodingWorker } from '@/lib/aiWorker';
 import { getAutoResolutionDetails } from '@/lib/aiResolver';
 import { validateServerApiAccess, projectTicketForUser } from '@/lib/serverAuth';
@@ -71,6 +72,12 @@ export async function PATCH(
 
     const body = await request.json();
 
+    // Boundary defense: client requests cannot inject forged lifecycle events
+    delete body.events;
+    if (body.ticketData) {
+      delete body.ticketData.events;
+    }
+
     // Ensure tickets are fetched from GitHub database on serverless execution
     await ticketStore.getTicketsAsync();
 
@@ -88,17 +95,45 @@ export async function PATCH(
     const isSuperAdminCaller = auth.isSuperAdmin;
 
     if (body.action === 'progress') {
-      if (!isSuperAdminCaller) {
+      if (!isSuperAdminCaller && !auth.isServiceWorker) {
         return NextResponse.json(
-          { success: false, error: 'Operação negada: Apenas o Administrador SuperAdmin pode atualizar o progresso de execução.' },
+          { success: false, error: 'Operação negada: Apenas o Administrador SuperAdmin ou Service Worker autorizado pode atualizar o progresso de execução.' },
           { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
-      const updated = await ticketStore.updateTicketProgress(
-        id,
-        Number(body.percentage || 0),
-        body.stepMessage || 'Executando tarefa no Antigravity...'
-      );
+
+      // Ordem 035: Restrição estrita de tenant e tarefa para service_worker
+      if (auth.isServiceWorker && !auth.isSuperAdmin) {
+        if (auth.allowedTasks && !auth.allowedTasks.includes('progress')) {
+          return NextResponse.json(
+            { success: false, error: `Acesso negado: Service Worker não possui autorização para a tarefa '${body.action}'.` },
+            { status: 403, headers: ANTI_CACHE_HEADERS }
+          );
+        }
+        const allowed = auth.allowedTenantIds || [];
+        const isAllowedTenant = allowed.includes(existingTicket.tenantId);
+        if (!isAllowedTenant) {
+          return NextResponse.json(
+            { success: false, error: `Acesso negado: Service Worker não possui escopo autorizado para o tenant '${existingTicket.tenantId}'.` },
+            { status: 403, headers: ANTI_CACHE_HEADERS }
+          );
+        }
+      }
+
+      const pct = Number(body.percentage || 0);
+      let updated;
+      if (pct >= 100) {
+        updated = await ticketStore.completeTicketProductionAsync(id, {
+          success: true,
+          solutionMessage: body.stepMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
+        });
+      } else {
+        updated = await ticketStore.updateTicketProgress(
+          id,
+          pct,
+          body.stepMessage || 'Executando tarefa no Antigravity...'
+        );
+      }
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
@@ -112,14 +147,28 @@ export async function PATCH(
           { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
-      const updated = await ticketStore.resetTicket(id);
-      if (!updated) {
+      const existing = ticketStore.getTicketById(id);
+      if (!existing && !INITIAL_TICKETS.some(t => t.id === id || t.code === id)) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
+      const updated = await ticketStore.resetTicket(id, auth.userEmail);
+      if (!updated) {
+        return NextResponse.json(
+          { success: false, error: 'Falha na persistência remota ao reiniciar o chamado na nuvem.' },
+          { status: 500, headers: ANTI_CACHE_HEADERS }
+        );
       }
       return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'approve') {
+      // Ordem 035: service_worker terminantemente bloqueado de aprovação Master
+      if (auth.isServiceWorker) {
+        return NextResponse.json(
+          { success: false, error: 'Aprovação negada: service_worker não possui permissão de aprovação Master.' },
+          { status: 403, headers: ANTI_CACHE_HEADERS }
+        );
+      }
       // Strict Server-Side Permission Check:
       // Only authenticated Master SuperAdmin with matching verified token can approve tickets.
       if (!isSuperAdminCaller) {
@@ -129,17 +178,34 @@ export async function PATCH(
         );
       }
 
+      // Prevent false Master approvals on seeded/client-cached tickets absent from shared storage.
+      const canonicalTickets = await fetchGitHubTickets();
+      const durableCheck = checkDurableApprovalSource(canonicalTickets, id, existingTicket.tenantId);
+      if (!durableCheck.ok) {
+        return NextResponse.json(
+          { success: false, code: durableCheck.code, error: durableCheck.message, executionDispatched: false },
+          { status: durableCheck.httpStatus, headers: ANTI_CACHE_HEADERS }
+        );
+      }
+
       const { ticket: updated, cloudSaveResult } = await ticketStore.startTicketProductionAsync(
         id,
         'HelpUS Master SuperAdmin',
         body.adminNotes,
-        body.ticketData
+        undefined, // approval must use server-owned record, never browser snapshot
+        auth.userEmail
       );
       if (!updated) {
+        if (cloudSaveResult && !cloudSaveResult.success) {
+          return NextResponse.json(
+            { success: false, error: `Falha na persistência remota ao autorizar chamado: ${cloudSaveResult.error}`, cloudSaveResult },
+            { status: 500, headers: ANTI_CACHE_HEADERS }
+          );
+        }
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
       }
 
-      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin), cloudSaveResult }, { status: 200, headers: ANTI_CACHE_HEADERS });
+      return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin), cloudSaveResult, executionDispatched: false }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
 
     if (body.action === 'complete' || body.action === 'resolve') {
@@ -150,12 +216,19 @@ export async function PATCH(
           { status: 403, headers: ANTI_CACHE_HEADERS }
         );
       }
+      const existing = ticketStore.getTicketById(id);
+      if (!existing) {
+        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+      }
       const updated = await ticketStore.completeTicketProductionAsync(id, {
         success: true,
         solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
       });
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+        return NextResponse.json(
+          { success: false, error: 'Falha na persistência remota ao concluir o chamado na nuvem.' },
+          { status: 500, headers: ANTI_CACHE_HEADERS }
+        );
       }
       return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
@@ -174,7 +247,8 @@ export async function PATCH(
         id,
         body.rejectionReason,
         'HelpUS Master SuperAdmin',
-        body.ticketData
+        body.ticketData,
+        auth.userEmail
       );
       if (!updated) {
         return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
@@ -295,10 +369,14 @@ export async function PATCH(
       const updated = await ticketStore.reopenTicketAsync(
         id,
         body.reason || 'Problema não totalmente sanado. Solicitando revisão.',
-        body.userName || (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente')
+        body.userName || (auth.userEmail ? auth.userEmail.split('@')[0] : 'Cliente'),
+        auth.userEmail
       );
       if (!updated) {
-        return NextResponse.json({ success: false, error: 'Ticket não encontrado' }, { status: 404, headers: ANTI_CACHE_HEADERS });
+        return NextResponse.json(
+          { success: false, error: 'Falha na persistência remota ao reabrir o chamado na nuvem.' },
+          { status: 500, headers: ANTI_CACHE_HEADERS }
+        );
       }
       return NextResponse.json({ success: true, data: projectTicketForUser(updated, auth.isSuperAdmin) }, { status: 200, headers: ANTI_CACHE_HEADERS });
     }
@@ -355,6 +433,12 @@ export async function POST(
     }
 
     const body = await request.json();
+
+    // Boundary defense: client requests cannot inject forged lifecycle events
+    delete body.events;
+    if (body.ticketData) {
+      delete body.ticketData.events;
+    }
 
     if (!body.content || (!body.senderId && !auth.userEmail)) {
       return NextResponse.json(

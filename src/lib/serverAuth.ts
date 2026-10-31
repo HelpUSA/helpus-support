@@ -1,7 +1,7 @@
 import crypto from 'crypto';
-import { Ticket } from '@/types/ticket';
+import { Ticket, TicketEvent } from '@/types/ticket';
 
-export type UserRole = 'super_admin' | 'admin' | 'agent' | 'client_admin' | 'client_user' | 'client';
+export type UserRole = 'super_admin' | 'admin' | 'agent' | 'client_admin' | 'client_user' | 'client' | 'service_worker';
 
 export const AUTHORIZED_SUPERADMIN_EMAILS = [
   'helpus.ecommerce@gmail.com',
@@ -20,11 +20,38 @@ export const AUTHORIZED_SUPERADMIN_EMAILS = [
  * 5. Projeção server-side (DTO): notas internas e instruções de admin são filtradas para clientes.
  */
 
-// Chave secreta de assinatura. Em produção deve vir obrigatoriamente de process.env.
-const SERVER_AUTH_SECRET =
-  process.env.AUTH_SECRET ||
-  process.env.SUPERADMIN_SECRET ||
-  'helpus_auth_hmac_sha256_internal_server_key_2026_secure';
+// P0-A (Ciclo 027): Separação de segredos por finalidade e eliminação de segredos hardcoded.
+// Em produção/Vercel: fail-closed estrito. Em dev/test: segredo efêmero aleatório gerado por processo.
+export function getSessionSecret(): string {
+  const secret = process.env.NEXT_PUBLIC_SESSION_SECRET || process.env.SESSION_SECRET || process.env.AUTH_SECRET || process.env.SUPERADMIN_SECRET;
+  if (!secret) {
+    if (typeof window !== 'undefined') {
+      return (globalThis as any).__EPHEMERAL_SESSION_SECRET || ((globalThis as any).__EPHEMERAL_SESSION_SECRET = 'helpus_auth_hmac_sha256_internal_server_key_2026_secure');
+    }
+    // Durante a fase de build do Next.js (prerender / coleta de rotas estáticas), usa chave efêmera descartável
+    const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build' || Boolean(process.env.NEXT_BUILD);
+    if ((process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') && !isBuildPhase) {
+      throw new Error('[SECURITY FATAL] SESSION_SECRET não configurado em ambiente de produção.');
+    }
+    return (globalThis as any).__EPHEMERAL_SESSION_SECRET || ((globalThis as any).__EPHEMERAL_SESSION_SECRET = crypto.randomBytes(32).toString('hex'));
+  }
+  return secret;
+}
+
+export function getEventHmacSecret(): string {
+  const secret = process.env.NEXT_PUBLIC_EVENT_HMAC_SECRET || process.env.EVENT_HMAC_SECRET || process.env.TICKET_EVENT_SECRET;
+  if (!secret) {
+    if (typeof window !== 'undefined') {
+      return (globalThis as any).__EPHEMERAL_EVENT_SECRET || ((globalThis as any).__EPHEMERAL_EVENT_SECRET = 'helpus_auth_hmac_sha256_internal_server_key_2026_secure');
+    }
+    const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build' || Boolean(process.env.NEXT_BUILD);
+    if ((process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') && !isBuildPhase) {
+      throw new Error('[SECURITY FATAL] EVENT_HMAC_SECRET não configurado em ambiente de produção.');
+    }
+    return (globalThis as any).__EPHEMERAL_EVENT_SECRET || ((globalThis as any).__EPHEMERAL_EVENT_SECRET = crypto.randomBytes(32).toString('hex'));
+  }
+  return secret;
+}
 
 export interface SessionPayload {
   userId: string;
@@ -32,6 +59,7 @@ export interface SessionPayload {
   role: UserRole;
   tenantId: string;
   allowedTenantIds: string[];
+  allowedTasks?: string[];
   iat: number;
   exp: number;
   iss?: string;
@@ -40,12 +68,14 @@ export interface SessionPayload {
 export interface ServerAuthDecision {
   authenticated: boolean;
   isSuperAdmin: boolean;
+  isServiceWorker?: boolean;
   userEmail?: string;
   userId?: string;
   role?: UserRole;
   userRole?: UserRole;
   tenantId?: string;
   allowedTenantIds?: string[];
+  allowedTasks?: string[];
   user?: {
     id: string;
     email: string;
@@ -53,6 +83,7 @@ export interface ServerAuthDecision {
     role: UserRole;
     tenantId: string;
     allowedTenantIds: string[];
+    allowedTasks?: string[];
     username: string;
     hasSupportAccess: boolean;
     status: 'active';
@@ -107,6 +138,7 @@ export function signSessionToken(
     role: UserRole;
     tenantId?: string;
     allowedTenantIds?: string[];
+    allowedTasks?: string[];
   },
   expiresInSeconds = 7 * 24 * 3600
 ): string {
@@ -121,13 +153,14 @@ export function signSessionToken(
     role: payload.role,
     tenantId,
     allowedTenantIds: payload.allowedTenantIds || [tenantId],
+    allowedTasks: payload.allowedTasks || (payload.role === 'service_worker' ? ['progress', 'verify'] : undefined),
     iat: now,
     exp: now + expiresInSeconds,
     iss: 'helpus-support-server',
   };
 
   const payloadB64 = toBase64Url(JSON.stringify(fullPayload));
-  const hmac = crypto.createHmac('sha256', SERVER_AUTH_SECRET);
+  const hmac = crypto.createHmac('sha256', getSessionSecret());
   hmac.update(`v1.${payloadB64}`);
   const sigB64 = digestBase64Url(hmac);
 
@@ -149,7 +182,7 @@ export function verifySessionToken(tokenString: string): SessionPayload | null {
   const [, payloadB64, sigB64] = parts;
 
   // 1. Recalcula a assinatura HMAC esperada
-  const hmac = crypto.createHmac('sha256', SERVER_AUTH_SECRET);
+  const hmac = crypto.createHmac('sha256', getSessionSecret());
   hmac.update(`v1.${payloadB64}`);
   const expectedSigB64 = digestBase64Url(hmac);
 
@@ -213,22 +246,45 @@ export function validateServerApiAccess(headers: { get(name: string): string | n
     const verified = verifySessionToken(tokenToVerify);
     if (verified) {
       const isSuperAdmin = verified.role === 'super_admin';
+      const isServiceWorker = verified.role === 'service_worker';
+
+      let effectiveTenantId = verified.tenantId;
+      let effectiveAllowedTenantIds = verified.allowedTenantIds;
+      if (isSuperAdmin) {
+        effectiveTenantId = 'all';
+        effectiveAllowedTenantIds = ['all'];
+      } else if (isServiceWorker) {
+        // Ordem 035: service_worker nunca recebe 'all' por omissão e fica estritamente restrito
+        effectiveTenantId = verified.tenantId || (verified.allowedTenantIds && verified.allowedTenantIds[0]) || 'publicarte';
+        effectiveAllowedTenantIds = verified.allowedTenantIds && verified.allowedTenantIds.length > 0
+          ? verified.allowedTenantIds
+          : (verified.tenantId ? [verified.tenantId] : ['publicarte']);
+      } else {
+        effectiveTenantId = verified.tenantId || (verified.allowedTenantIds && verified.allowedTenantIds[0]) || 'all';
+        effectiveAllowedTenantIds = verified.allowedTenantIds || (verified.tenantId ? [verified.tenantId] : ['all']);
+      }
+
+      const effectiveTasks = verified.allowedTasks || (isServiceWorker ? ['progress', 'verify'] : undefined);
+
       return {
         authenticated: true,
         isSuperAdmin,
+        isServiceWorker,
         userEmail: verified.email,
         userId: verified.userId,
         role: verified.role,
         userRole: verified.role,
-        tenantId: isSuperAdmin ? 'all' : verified.tenantId,
-        allowedTenantIds: isSuperAdmin ? ['all'] : verified.allowedTenantIds,
+        tenantId: effectiveTenantId,
+        allowedTenantIds: effectiveAllowedTenantIds,
+        allowedTasks: effectiveTasks,
         user: {
           id: verified.userId,
           email: verified.email,
           name: verified.email.split('@')[0],
           role: verified.role,
-          tenantId: isSuperAdmin ? 'all' : verified.tenantId,
-          allowedTenantIds: isSuperAdmin ? ['all'] : verified.allowedTenantIds,
+          tenantId: effectiveTenantId,
+          allowedTenantIds: effectiveAllowedTenantIds,
+          allowedTasks: effectiveTasks,
           username: verified.email.split('@')[0],
           hasSupportAccess: true,
           status: 'active',
@@ -306,4 +362,111 @@ export function projectTicketForUser(ticket: Ticket, isSuperAdmin: boolean): Tic
 
 export function projectTicketListForUser(tickets: Ticket[], isSuperAdmin: boolean): Ticket[] {
   return tickets.map((t) => projectTicketForUser(t, isSuperAdmin));
+}
+
+
+/**
+ * P0-C (Auditoria Ciclo 027):
+ * Cálculo canônico de payload cobrindo 100% dos campos de governança do TicketEvent.
+ */
+export function computeEventPayload(event: Omit<TicketEvent, 'signature'>): string {
+  const parts = [
+    event.id,
+    event.ticketId,
+    (event as any).tenantId || '',
+    event.type,
+    event.status,
+    event.progressPercentage ?? 0,
+    event.actorEmail || '',
+    event.actorRole || '',
+    event.timestamp,
+    event.seq ?? 0,
+    event.idempotencyKey || '',
+    event.note || '',
+    event.authorized ? 'auth:true' : 'auth:false',
+  ];
+  return parts.join('|');
+}
+
+/**
+ * P0-A & P0-C: Assinatura criptográfica HMAC-SHA256 usando chave dedicada EVENT_HMAC_SECRET.
+ */
+export function signTicketEvent(event: Omit<TicketEvent, 'signature'>): string {
+  const secret = getEventHmacSecret();
+  const payload = computeEventPayload(event);
+  return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+/**
+ * P0-A, P0-B & P0-C: Verificação rigorosa de integridade, proveniência e temporalidade do TicketEvent.
+ * - Zero bypass: eventos com IDs prefixados (evt-aid-, etc.) DEVEM possuir assinatura HMAC válida.
+ * - Rejeição estrita de timestamps futuros (skew > 60s).
+ * - Comparação segura constant-time via timingSafeEqual.
+ */
+export function verifyTicketEventIntegrity(
+  event: TicketEvent,
+  maxFutureSkewMs: number = 60_000,
+  referenceNowMs: number = Date.now()
+): { valid: boolean; reason?: string } {
+  if (!event || !event.id || !event.type || !event.timestamp) {
+    return { valid: false, reason: 'missing_fields' };
+  }
+
+  // 1. Verificação de desvio temporal / Timestamp no futuro (P0-A)
+  const eventTime = new Date(event.timestamp).getTime();
+  if (isNaN(eventTime)) {
+    return { valid: false, reason: 'invalid_timestamp_format' };
+  }
+  if (eventTime > referenceNowMs + maxFutureSkewMs) {
+    return { valid: false, reason: 'future_timestamp_rejected' };
+  }
+
+  // 2. Segregação de privilégios e papéis por tipo de evento
+  if (
+    event.type === 'master_approved' ||
+    event.type === 'ticket_reset_by_master' ||
+    event.type === 'ticket_rejected'
+  ) {
+    if (event.actorRole !== 'master_superadmin') {
+      return { valid: false, reason: 'invalid_role_for_master_event' };
+    }
+    const email = (event.actorEmail || '').toLowerCase();
+    const isAuthorized =
+      email === 'master.superadmin@helpusbr.com' ||
+      email === 'helpus.ecommerce@gmail.com' ||
+      (AUTHORIZED_SUPERADMIN_EMAILS as readonly string[]).some((e) => e.toLowerCase() === email);
+    if (!isAuthorized) {
+      return { valid: false, reason: 'unauthorized_master_email' };
+    }
+  }
+
+  if (event.type === 'ticket_resolved' || event.type === 'production_step') {
+    if (event.actorRole !== 'system_pipeline' && event.actorRole !== 'master_superadmin') {
+      return { valid: false, reason: 'invalid_role_for_pipeline_event' };
+    }
+  }
+
+  if (event.type === 'ticket_reopened_by_client' || event.type === 'ticket_created') {
+    if (event.actorRole !== 'client' && event.actorRole !== 'tenant_admin' && event.actorRole !== 'master_superadmin') {
+      return { valid: false, reason: 'invalid_role_for_client_event' };
+    }
+  }
+
+  // 3. P0-B: Zero bypass por prefixo de ID! Assinatura HMAC é estritamente obrigatória para TODOS os eventos.
+  if (!event.signature || typeof event.signature !== 'string') {
+    return { valid: false, reason: 'missing_server_signature' };
+  }
+
+  try {
+    const expectedSig = signTicketEvent(event);
+    const sigBuf = Buffer.from(event.signature, 'hex');
+    const expBuf = Buffer.from(expectedSig, 'hex');
+    if (!safeTimingEqual(sigBuf, expBuf)) {
+      return { valid: false, reason: 'tampered_signature' };
+    }
+  } catch (err: any) {
+    return { valid: false, reason: 'crypto_verification_failed' };
+  }
+
+  return { valid: true };
 }

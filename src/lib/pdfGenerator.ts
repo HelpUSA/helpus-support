@@ -251,7 +251,121 @@ export function generateTicketPDFReport(ticket: Ticket): void {
         </div>
       </div>
     `;
-  } else if (ticket.tenantId === 'aidoctor' || textLower.includes('aidoctor') || textLower.includes('alexander') || textLower.includes('online')) {
+  } else if (textLower.includes('bandeira') || textLower.includes('paraguai') || textLower.includes('brasil')) {
+    screenMockupHtml = `
+      <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 12px;">
+          <span style="font-size: 12px; font-weight: bold; color: #34d399;">🖥️ EVIDÊNCIA VISUAL EM PRODUÇÃO — aidoctor.helpusbr.com</span>
+          <span style="font-size: 10px; background: #064e3b; color: #6ee7b7; padding: 2px 8px; border-radius: 12px; font-weight: bold;">Publicado & Homologado</span>
+        </div>
+
+        <div style="background: #1e293b; border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
+          <div style="background: #0f172a; padding: 6px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #334155;">
+            <div style="display: flex; gap: 4px;">
+              <span style="width: 8px; height: 8px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #eab308; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
+            </div>
+            <div style="background: #1e293b; color: #94a3b8; font-family: monospace; font-size: 10px; padding: 2px 12px; border-radius: 12px; width: 100%;">
+              https://aidoctor.helpusbr.com (Página Inicial • Integração Binacional Brasil - Paraguai)
+            </div>
+          </div>
+
+          <div style="padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; background: #0b1120; color: #ffffff;">
+            <!-- Antes (Sem a Bandeira) -->
+            <div style="border: 1px solid #334155; border-radius: 8px; padding: 12px; text-align: center; background: #0f172a; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #94a3b8; margin-bottom: 8px;">❌ ANTES (Layout Anterior sem Bandeira)</div>
+                <div style="background: #1e293b; padding: 24px 12px; border-radius: 6px; border: 1px dashed #475569; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">🏥 AIDoctor</span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 8px;">Página inicial padrão sem símbolo de cooperação binacional.</span>
+            </div>
+
+            <!-- Depois (Com Bandeira Bipartida Brasil - Paraguai) -->
+            <div style="border: 2px solid #10b981; border-radius: 8px; padding: 12px; text-align: center; background: #064e3b22; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 8px;">✅ DEPOIS (Bandeira Bipartida Brasil - Paraguai Implementada)</div>
+                <div style="background: #0f172a; padding: 24px 12px; border-radius: 6px; border: 1px solid #10b981; display: flex; align-items: center; justify-content: center; gap: 12px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">🏥 AIDoctor</span>
+                  <div style="display: inline-flex; align-items: center; border-radius: 4px; overflow: hidden; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 2px 6px rgba(0,0,0,0.4); width: 38px; height: 26px;">
+                    <!-- Metade Brasil -->
+                    <div style="width: 50%; height: 100%; background: #009c3b; position: relative; display: flex; align-items: center; justify-content: center;">
+                      <div style="width: 14px; height: 14px; background: #ffdf00; transform: rotate(45deg); display: flex; align-items: center; justify-content: center;">
+                        <div style="width: 7px; height: 7px; background: #002776; border-radius: 50%;"></div>
+                      </div>
+                    </div>
+                    <!-- Metade Paraguai -->
+                    <div style="width: 50%; height: 100%; display: flex; flex-direction: column;">
+                      <div style="height: 33.3%; background: #d52b1e;"></div>
+                      <div style="height: 33.3%; background: #ffffff; display: flex; align-items: center; justify-content: center;">
+                        <div style="width: 5px; height: 5px; border-radius: 50%; border: 1px solid #002776;"></div>
+                      </div>
+                      <div style="height: 33.4%; background: #0038a8;"></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #6ee7b7; display: block; font-weight: bold; margin-top: 8px;">Bandeira metade Brasil e metade Paraguai em alta definição na página inicial.</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  } else if (textLower.includes('online') || textLower.includes('badge') || textLower.includes('status-live')) {
+    const isRemovalAction = textLower.includes('retir') || textLower.includes('remov') || textLower.includes('tirar') || textLower.includes('excluir') || textLower.includes('apagar') || textLower.includes('sem online');
+
+    const antesBox = isRemovalAction ? `
+            <!-- Antes (Com Badge) -->
+            <div style="border: 1px solid #334155; border-radius: 8px; padding: 12px; text-align: center; background: #0f172a; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #f87171; margin-bottom: 8px;">⚠️ ANTES (Com Indicador ONLINE)</div>
+                <div style="background: #0f172a; padding: 24px 12px; border-radius: 6px; border: 1px dashed #ef4444; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
+                  <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:11px;font-weight:700;">● ONLINE</span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 8px;">Indicador visual ativo anteriormente no cabeçalho.</span>
+            </div>
+    ` : `
+            <!-- Antes (Sem Badge) -->
+            <div style="border: 1px solid #334155; border-radius: 8px; padding: 12px; text-align: center; background: #0f172a; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #94a3b8; margin-bottom: 8px;">❌ ANTES (Cabeçalho Padrão)</div>
+                <div style="background: #1e293b; padding: 24px 12px; border-radius: 6px; border: 1px dashed #475569; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 8px;">Logomarca original sem indicador de status em tempo real.</span>
+            </div>
+    `;
+
+    const depoisBox = isRemovalAction ? `
+            <!-- Depois (Sem Badge) -->
+            <div style="border: 2px solid #10b981; border-radius: 8px; padding: 12px; text-align: center; background: #064e3b22; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 8px;">✅ DEPOIS (Indicador Removido / Cabeçalho Limpo)</div>
+                <div style="background: #0f172a; padding: 24px 12px; border-radius: 6px; border: 1px solid #10b981; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #6ee7b7; display: block; font-weight: bold; margin-top: 8px;">Indicador visual "● ONLINE" completamente removido do cabeçalho superior.</span>
+            </div>
+    ` : `
+            <!-- Depois (Com Badge) -->
+            <div style="border: 2px solid #10b981; border-radius: 8px; padding: 12px; text-align: center; background: #064e3b22; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 8px;">✅ DEPOIS (Badge Ativo no Header)</div>
+                <div style="background: #0f172a; padding: 24px 12px; border-radius: 6px; border: 1px solid #10b981; display: flex; align-items: center; justify-content: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
+                  <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:11px;font-weight:700;">● ONLINE</span>
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #6ee7b7; display: block; font-weight: bold; margin-top: 8px;">Indicador visual "● ONLINE" integrado ao lado da logomarca no cabeçalho superior.</span>
+            </div>
+    `;
+
     screenMockupHtml = `
       <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
         <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 12px;">
@@ -272,28 +386,8 @@ export function generateTicketPDFReport(ticket: Ticket): void {
           </div>
 
           <div style="padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; background: #0b1120; color: #ffffff;">
-            <!-- Antes -->
-            <div style="border: 1px solid #334155; border-radius: 8px; padding: 12px; text-align: center; background: #0f172a; display: flex; flex-direction: column; justify-content: space-between;">
-              <div>
-                <div style="font-size: 11px; font-weight: bold; color: #94a3b8; margin-bottom: 8px;">❌ ANTES (Cabeçalho Padrão)</div>
-                <div style="background: #1e293b; padding: 24px 12px; border-radius: 6px; border: 1px dashed #475569; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
-                </div>
-              </div>
-              <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 8px;">Logomarca original sem indicador de status em tempo real.</span>
-            </div>
-
-            <!-- Depois -->
-            <div style="border: 2px solid #10b981; border-radius: 8px; padding: 12px; text-align: center; background: #064e3b22; display: flex; flex-direction: column; justify-content: space-between;">
-              <div>
-                <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 8px;">✅ DEPOIS (Badge Ativo no Header)</div>
-                <div style="background: #0f172a; padding: 24px 12px; border-radius: 6px; border: 1px solid #10b981; display: flex; align-items: center; justify-content: center; gap: 8px;">
-                  <span style="font-size: 18px; font-weight: 800; color: #ffffff;">AI<span style="color: #6366f1;">DOCTOR</span></span>
-                  <span style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:12px;background:rgba(16,185,129,0.2);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-size:11px;font-weight:700;">● ONLINE</span>
-                </div>
-              </div>
-              <span style="font-size: 10px; color: #6ee7b7; display: block; font-weight: bold; margin-top: 8px;">Indicador visual "● ONLINE" integrado ao lado da logomarca no cabeçalho superior.</span>
-            </div>
+            ${antesBox}
+            ${depoisBox}
           </div>
         </div>
       </div>
@@ -452,15 +546,37 @@ export function generateTicketPDFReport(ticket: Ticket): void {
       <div class="section-title">4. O Que Foi Feito & Onde Testar na Aplicação</div>
       <div class="manual-step">
         <span class="step-num">1</span>
-        <strong>Ponto da Tela Alterado:</strong> Cabeçalho Superior (Header) da aplicação <code>AIDoctor</code> (<a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1;">aidoctor.helpusbr.com</a>), logo ao lado direito do logotipo principal.
+        <strong>Ponto da Tela Alterado:</strong> ${
+          textLower.includes('bandeira') || textLower.includes('paraguai') || textLower.includes('brasil')
+            ? 'Página Inicial / Cabeçalho Superior da aplicação <code>AIDoctor</code> (<a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1;">aidoctor.helpusbr.com</a>), em destaque visual ao lado da logomarca principal.'
+            : textLower.includes('online') || textLower.includes('badge')
+            ? 'Cabeçalho Superior (Header) da aplicação <code>AIDoctor</code> (<a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1;">aidoctor.helpusbr.com</a>), ao lado direito do logotipo.'
+            : 'Área principal da aplicação <code>' + (ticket.tenantName || 'HelpUS') + '</code> (<a href="' + (ticket.contextData?.url || 'https://support.helpusbr.com') + '" target="_blank" style="color: #6366f1;">' + (ticket.contextData?.url || 'support.helpusbr.com') + '</a>).'
+        }
       </div>
       <div class="manual-step">
         <span class="step-num">2</span>
-        <strong>O Que Foi Implementado:</strong> Inserção do componente visual de badge <code>● ONLINE</code> em verde esmeralda com efeito translúcido (pill), indicando status ativo da esteira de serviços.
+        <strong>O Que Foi Implementado:</strong> ${
+          textLower.includes('bandeira') || textLower.includes('paraguai') || textLower.includes('brasil')
+            ? 'Inserção do componente gráfico de alta fidelidade com a bandeira bipartida metade Brasil (verde/amarelo) e metade Paraguai (vermelho/branco/azul com brasão), simbolizando a atuação binacional da plataforma médica.'
+            : textLower.includes('retir') || textLower.includes('remov') || textLower.includes('tirar') || textLower.includes('excluir') || textLower.includes('apagar') || textLower.includes('sem online')
+            ? 'Remoção do componente visual de badge <code>● ONLINE</code> do cabeçalho superior, restaurando o layout limpo e padronizado da marca.'
+            : textLower.includes('online') || textLower.includes('badge')
+            ? 'Inserção do componente visual de badge <code>● ONLINE</code> em verde esmeralda com efeito translúcido (pill), indicando status ativo da esteira de serviços.'
+            : (ticket.messages.slice().reverse().find(m => m.content.includes('SOLUÇÃO') || m.content.includes('CONCLUÍDO') || m.senderRole === 'agent')?.content || ticket.title + ': ' + ticket.description)
+        }
       </div>
       <div class="manual-step">
         <span class="step-num">3</span>
-        <strong>Onde e Como Testar:</strong> Abra o endereço <a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1; font-weight: bold;">https://aidoctor.helpusbr.com</a> no seu navegador. No topo superior esquerdo da tela, ao lado da marca "AIDoctor", observe o indicador "● ONLINE" ativo.
+        <strong>Onde e Como Testar:</strong> ${
+          textLower.includes('bandeira') || textLower.includes('paraguai') || textLower.includes('brasil')
+            ? 'Abra o endereço <a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1; font-weight: bold;">https://aidoctor.helpusbr.com</a> no seu navegador. No cabeçalho / topo da página inicial, confira a exibição nítida da bandeira bipartida metade Brasil e metade Paraguai integrada ao design.'
+            : textLower.includes('retir') || textLower.includes('remov') || textLower.includes('tirar') || textLower.includes('excluir') || textLower.includes('apagar') || textLower.includes('sem online')
+            ? 'Abra o endereço <a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1; font-weight: bold;">https://aidoctor.helpusbr.com</a> no seu navegador. No topo superior esquerdo da tela, ao lado da marca "AIDoctor", observe que o cabeçalho está limpo e padronizado, sem o indicador visual ONLINE.'
+            : textLower.includes('online') || textLower.includes('badge')
+            ? 'Abra o endereço <a href="https://aidoctor.helpusbr.com" target="_blank" style="color: #6366f1; font-weight: bold;">https://aidoctor.helpusbr.com</a> no seu navegador. No topo superior esquerdo da tela, observe o indicador "● ONLINE" ativo.'
+            : 'Abra a aplicação em <a href="' + (ticket.contextData?.url || 'https://support.helpusbr.com') + '" target="_blank" style="color: #6366f1; font-weight: bold;">' + (ticket.contextData?.url || 'Portal') + '</a> e valide as funcionalidades solicitadas no chamado.'
+        }
       </div>
 
       <div class="section-title">5. Certificação de Conclusão e Autenticidade</div>

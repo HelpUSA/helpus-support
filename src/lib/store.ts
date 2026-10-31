@@ -14,153 +14,6 @@ export { INITIAL_TENANTS };
 
 export const INITIAL_TICKETS: Ticket[] = [
   {
-    id: "tck-1792960000000",
-    tenantId: "aidoctor",
-    tenantName: "AIDoctor",
-    code: "AID-101",
-    title: "Retire o texto circulado na imagem em anexo",
-    description: "Solicitação para remoção dos textos circulares com badges de CRM fictícios (CRM/SP, CRM/RJ, CRM/PR) na seção de depoimentos da aplicação AIDoctor (aidoctor.helpusbr.com), adequando a página às normas de publicidade médica do CFM.",
-    category: "feature",
-    priority: "high",
-    status: "resolved",
-    progressPercentage: 100,
-    assignedTo: "HelpUS Master SuperAdmin",
-    createdByEmail: "helpus.ecommerce@gmail.com",
-    createdByName: "SuperAdmin HelpUS",
-    contextData: {
-      url: "https://aidoctor.helpusbr.com",
-      userEmail: "helpus.ecommerce@gmail.com",
-      userName: "SuperAdmin HelpUS",
-      os: "Mobile Android / Chrome",
-      screen: "472x1024"
-    },
-    attachments: [
-      {
-        id: "att-aid-01",
-        name: "screenshot_crm_circulado.png",
-        url: "/uploads/screenshot_crm_circulado.png",
-        type: "image/png",
-        size: 142000
-      }
-    ],
-    messages: [
-      {
-        id: "msg-aid-001",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus.ecommerce@gmail.com",
-        senderName: "SuperAdmin HelpUS",
-        senderRole: "client",
-        isInternalNote: false,
-        content: "Retire o texto circulado na imagem em anexo (CRM/SP no card de depoimentos de médicos).",
-        createdAt: "2026-10-25T17:30:00.000Z"
-      },
-      {
-        id: "msg-aid-002",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus-master",
-        senderName: "HelpUS Master SuperAdmin",
-        senderRole: "agent",
-        isInternalNote: false,
-        content: "✅ Aprovação Concedida pelo Administrador HelpUS (HelpUS Master SuperAdmin). Autorizando envio para produção...",
-        createdAt: "2026-10-25T17:34:00.000Z"
-      },
-      {
-        id: "msg-aid-003",
-        ticketId: "tck-1792960000000",
-        senderId: "ci.cd@helpusbr.com",
-        senderName: "Pipeline de Produção Vercel",
-        senderRole: "agent",
-        isInternalNote: false,
-        content: "⚡ *[ENTROU EM PRODUÇÃO]*: O robô autônomo iniciou o processamento do código e o envio para a nuvem Vercel (AIDoctor). Compilação e deploy concluídos.",
-        createdAt: "2026-10-25T17:34:05.000Z"
-      },
-      {
-        id: "msg-aid-004",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus-master",
-        senderName: "HelpUS Master SuperAdmin",
-        senderRole: "agent",
-        isInternalNote: false,
-        content: "✨ *[CONCLUÍDO & RESOLVIDO]*: O texto circulado 'CRM/SP' e os placeholders 'CRM/RJ' e 'CRM/PR' foram completamente removidos dos cards de depoimentos da página https://aidoctor.helpusbr.com. Em seu lugar, foram inseridos ícones vetoriais neutros em SVG estilizados em dourado (#D4AF37), garantindo 100% de conformidade com a Resolução CFM nº 2.336/2023 de Publicidade Médica. Deploy realizado em produção na Vercel com sucesso.",
-        createdAt: "2026-10-25T17:53:00.000Z"
-      },
-      {
-        id: "msg-aid-005",
-        ticketId: "tck-1792960000000",
-        senderId: "helpus.ecommerce@gmail.com",
-        senderName: "HelpUS Master SuperAdmin",
-        senderRole: "client",
-        isInternalNote: false,
-        content: "🔄 *Chamado Reaberto pelo Cliente (HelpUS Master SuperAdmin)*\n\nMotivo da Reabertura: a mensagem ainda continua.\n\n*Aguardando Nova Aprovação Master para Envio a Produção.*",
-        createdAt: "2026-10-25T19:25:00.000Z"
-      }
-    ],
-    events: [
-      {
-        id: "evt-aid-001",
-        ticketId: "tck-1792960000000",
-        type: "ticket_created",
-        actorEmail: "helpus.ecommerce@gmail.com",
-        actorRole: "client",
-        authorized: true,
-        progressPercentage: 0,
-        status: "pending_approval",
-        note: "Retire o texto circulado na imagem em anexo",
-        timestamp: "2026-10-25T17:30:00.000Z"
-      },
-      {
-        id: "evt-aid-002",
-        ticketId: "tck-1792960000000",
-        type: "master_approved",
-        actorEmail: "master.superadmin@helpusbr.com",
-        actorRole: "master_superadmin",
-        authorized: true,
-        progressPercentage: 0,
-        status: "in_production",
-        note: "Aprovação Concedida pelo Administrador HelpUS",
-        timestamp: "2026-10-25T17:34:00.000Z"
-      },
-      {
-        id: "evt-aid-003",
-        ticketId: "tck-1792960000000",
-        type: "production_step",
-        actorEmail: "ci.cd@helpusbr.com",
-        actorRole: "system_pipeline",
-        authorized: true,
-        progressPercentage: 75,
-        status: "in_production",
-        note: "Deploy acionado na Vercel",
-        timestamp: "2026-10-25T17:34:05.000Z"
-      },
-      {
-        id: "evt-aid-004",
-        ticketId: "tck-1792960000000",
-        type: "ticket_resolved",
-        actorEmail: "ci.cd@helpusbr.com",
-        actorRole: "system_pipeline",
-        authorized: true,
-        progressPercentage: 100,
-        status: "resolved",
-        note: "Deploy realizado em produção na Vercel com sucesso",
-        timestamp: "2026-10-25T17:53:00.000Z"
-      },
-      {
-        id: "evt-aid-005",
-        ticketId: "tck-1792960000000",
-        type: "ticket_reopened_by_client",
-        actorEmail: "helpus.ecommerce@gmail.com",
-        actorRole: "client",
-        authorized: true,
-        progressPercentage: 0,
-        status: "pending_approval",
-        note: "a mensagem ainda continua.",
-        timestamp: "2026-10-25T19:25:00.000Z"
-      }
-    ],
-    createdAt: "2026-10-25T17:30:00.000Z",
-    updatedAt: "2026-10-25T19:25:00.000Z"
-  },
-  {
     id: "tck-1791240000000",
     tenantId: "usmle",
     tenantName: "USMLE Prep Suite",
@@ -578,37 +431,6 @@ export function reconcileTicketLifecycle(
   };
 }
 
-
-/**
- * Ordem 077 — A raiz de um ticket é projeção de eventos com HMAC válido.
- * A ordem de seq vence timestamp: um progresso stale (seq inferior)
- * não pode reverter um evento terminal mais recente.
- * Prova de execução/deploy é um gate SEPARADO desta projeção.
- */
-export function materializeSignedTicketLifecycle(ticket: Ticket): Ticket {
-  if (!ticket || !Array.isArray(ticket.events) || ticket.events.length === 0) return ticket;
-  const verified = ticket.events.filter(evt =>
-    evt && evt.ticketId === ticket.id && evt.authorized === true &&
-    verifyTicketEventIntegrity(evt).valid);
-  if (!verified.length) return ticket;
-  const ordered = [...verified].sort((a, b) =>
-    ((a.seq || 0) - (b.seq || 0)) ||
-    ((a.timestamp || '').localeCompare(b.timestamp || '')) ||
-    ((a.id || '').localeCompare(b.id || '')));
-  const reconciled = reconcileTicketLifecycle(ticket, ticket, ordered);
-  return {
-    ...ticket,
-    status: reconciled.status,
-    progressPercentage: reconciled.progressPercentage,
-    reopenedAt: reconciled.reopenedAt || ticket.reopenedAt
-  };
-}
-export function prepareTicketsForCAS(remote: Ticket[], pending: Ticket[]): Ticket[] {
-  if (!Array.isArray(remote) || !Array.isArray(pending))
-    throw new Error('CAS_TICKETS_INVALID');
-  return mergeTicketsGranular(remote, pending).map(materializeSignedTicketLifecycle);
-}
-
 export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Ticket[]): Ticket[] {
   const map = new Map<string, Ticket>();
 
@@ -747,33 +569,17 @@ export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Prom
   while (attempt < maxRetries) {
     attempt++;
     try {
-      // 1. Ler SHA e CONTEÚDO do mesmo blob imutável.
-      // Obter SHA recente e enviar um snapshot stale no primeiro PUT causa perda
-      // de eventos mesmo quando GitHub CAS aceita a escrita.
+      // 1. Obter SHA mais recente via CAS
       const check = await githubApiRequest('GET', `/repos/${DB_REPO}/contents/${DB_PATH}?t=${Date.now()}`);
-      let latestSha: string | undefined;
-      if (check.status === 200 && /^[a-f0-9]{40}$/.test(check.data?.sha || '')) {
+      let latestSha: string | undefined = undefined;
+      if (check.status === 200 && check.data && check.data.sha) {
         latestSha = check.data.sha;
-        const blob = await githubApiRequest('GET', `/repos/${DB_REPO}/git/blobs/${latestSha}`);
-        if (blob.status !== 200 || blob.data?.sha !== latestSha ||
-            blob.data?.encoding !== 'base64' || typeof blob.data.content !== 'string') {
-          return { success: false, error: 'CAS_LATEST_BLOB_UNAVAILABLE' };
-        }
-        let remoteTickets: Ticket[];
-        try {
-          const decoded = Buffer.from(blob.data.content.replace(/\s/g, ''), 'base64').toString('utf-8');
-          remoteTickets = JSON.parse(decoded);
-          if (!Array.isArray(remoteTickets)) throw new Error('not_array');
-        } catch {
-          return { success: false, error: 'CAS_LATEST_BLOB_INVALID' };
-        }
-        currentTickets = prepareTicketsForCAS(remoteTickets, currentTickets);
+        cloudSha = check.data.sha;
       } else if (check.status === 404) {
-        // Criação inicial; não aceitar elementos sem forma de array.
+        // Arquivo ainda não existe na branch, SHA inicial fica undefined
         latestSha = undefined;
-        currentTickets = prepareTicketsForCAS([], currentTickets);
       } else {
-        return { success: false, error: `CAS_SHA_READ_FAILED_${check.status}` };
+        return { success: false, error: `Check SHA failed (${check.status}): ${check.raw}` };
       }
 
       // 2. PUT com Compare-And-Swap (SHA)
@@ -798,7 +604,7 @@ export async function saveGitHubTickets(tickets: Ticket[], maxRetries = 3): Prom
           console.error(`[CAS ABORT] Re-fetch falhou durante conflito 409 na tentativa ${attempt}. Abortando retry para evitar corrupcao de dados.`);
           return { success: false, error: 'CAS_409_REFETCH_FAILED' };
         }
-        currentTickets = prepareTicketsForCAS(remoteTickets, currentTickets);
+        currentTickets = mergeTicketsGranular(remoteTickets, currentTickets);
         continue; // Retry com SHA atualizado e historico preservado
       }
 
@@ -1052,8 +858,7 @@ export class TicketStore {
             merged.push(initTicket);
           }
         }
-        // Read-side projection: raw GitHub root can lag behind signed terminal ledger.
-        this.tickets = merged.map(materializeSignedTicketLifecycle).sort(
+        this.tickets = merged.sort(
           (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
         );
         try {
@@ -1344,7 +1149,6 @@ export class TicketStore {
       success: boolean;
       solutionMessage: string;
       error?: string;
-      evidence?: any;
     },
     options?: { deferSideEffects?: boolean }
   ): Ticket | undefined {
@@ -1355,7 +1159,6 @@ export class TicketStore {
 
     if (workerResult.success) {
       ticket.status = 'resolved';
-      ticket.progressPercentage = 100; // raiz e evento terminal devem concordar
       ticket.messages.push({
         id: `msg-res-${Date.now()}`,
         ticketId: ticket.id,
@@ -1426,12 +1229,8 @@ export class TicketStore {
     const backupTickets = JSON.parse(JSON.stringify(this.tickets));
     const ticket = this.getTicketById(ticketId);
     if (!ticket) return undefined;
-    // Uma etapa de progresso nunca reabre um ticket terminal assinado.
-    const projected = materializeSignedTicketLifecycle(ticket);
-    if (projected.status === 'resolved' || projected.status === 'closed' ||
-        projected.status === 'rejected') return undefined;
 
-    ticket.progressPercentage = Math.min(99, Math.max(0, percentage));
+    ticket.progressPercentage = Math.min(100, Math.max(0, percentage));
     ticket.progressStep = stepMessage;
     ticket.updatedAt = new Date().toISOString();
 
@@ -1766,7 +1565,6 @@ export class TicketStore {
       success: boolean;
       solutionMessage: string;
       error?: string;
-      evidence?: any;
     }
   ): Promise<Ticket | undefined> {
     // P0-B: Transação atômica com rollback do cache em memória

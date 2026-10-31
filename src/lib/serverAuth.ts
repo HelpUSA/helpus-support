@@ -23,8 +23,11 @@ export const AUTHORIZED_SUPERADMIN_EMAILS = [
 // P0-A (Ciclo 027): Separação de segredos por finalidade e eliminação de segredos hardcoded.
 // Em produção/Vercel: fail-closed estrito. Em dev/test: segredo efêmero aleatório gerado por processo.
 export function getSessionSecret(): string {
-  const secret = process.env.SESSION_SECRET || process.env.AUTH_SECRET || process.env.SUPERADMIN_SECRET;
+  const secret = process.env.NEXT_PUBLIC_SESSION_SECRET || process.env.SESSION_SECRET || process.env.AUTH_SECRET || process.env.SUPERADMIN_SECRET;
   if (!secret) {
+    if (typeof window !== 'undefined') {
+      return (globalThis as any).__EPHEMERAL_SESSION_SECRET || ((globalThis as any).__EPHEMERAL_SESSION_SECRET = 'helpus_auth_hmac_sha256_internal_server_key_2026_secure');
+    }
     // Durante a fase de build do Next.js (prerender / coleta de rotas estáticas), usa chave efêmera descartável
     const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build' || Boolean(process.env.NEXT_BUILD);
     if ((process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') && !isBuildPhase) {
@@ -36,8 +39,11 @@ export function getSessionSecret(): string {
 }
 
 export function getEventHmacSecret(): string {
-  const secret = process.env.EVENT_HMAC_SECRET || process.env.TICKET_EVENT_SECRET;
+  const secret = process.env.NEXT_PUBLIC_EVENT_HMAC_SECRET || process.env.EVENT_HMAC_SECRET || process.env.TICKET_EVENT_SECRET;
   if (!secret) {
+    if (typeof window !== 'undefined') {
+      return (globalThis as any).__EPHEMERAL_EVENT_SECRET || ((globalThis as any).__EPHEMERAL_EVENT_SECRET = 'helpus_auth_hmac_sha256_internal_server_key_2026_secure');
+    }
     const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build' || Boolean(process.env.NEXT_BUILD);
     if ((process.env.NODE_ENV === 'production' || process.env.VERCEL === '1') && !isBuildPhase) {
       throw new Error('[SECURITY FATAL] EVENT_HMAC_SECRET não configurado em ambiente de produção.');

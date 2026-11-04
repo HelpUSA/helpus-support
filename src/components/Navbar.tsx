@@ -38,8 +38,8 @@ export default function Navbar({
               <span className="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-full">
                 SaaS Hub
               </span>
-              <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
                 v3.0 Ativo
               </span>
             </div>

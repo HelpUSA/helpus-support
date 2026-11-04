@@ -28,3 +28,7 @@ portal_live_test.png
 
 .temp_build/
 .temp/
+.env*
+
+.helpus_daily_external_budget.json
+.staging_hmac_secret

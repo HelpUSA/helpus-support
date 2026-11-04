@@ -30,6 +30,20 @@ interface TenantConfig {
 }
 
 const TENANT_CONFIGS: Record<string, TenantConfig> = {
+  'neuro.eduardomagalhaes': {
+    repo: 'HelpUSA/neuro-eduardomagalhaes',
+    name: 'Dr. Eduardo Magalhães Neurologista (Neuro)',
+    domain: 'neuro.eduardomagalhaes.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_NEURO || 'neuroeduardomagalhaes',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_NEURO || '',
+  },
+  support: {
+    repo: 'HelpUSA/helpus-support',
+    name: 'HelpUS Support Hub',
+    domain: 'support.helpusbr.com',
+    projectId: process.env.VERCEL_PROJECT_SUPPORT || 'helpus-support',
+    deployHook: process.env.VERCEL_DEPLOY_HOOK_SUPPORT || '',
+  },
   aidoctor: {
     repo: 'HelpUSA/aidoctor',
     name: 'AIDoctor — Inteligência Artificial Clínica',
@@ -305,7 +319,7 @@ ${f.content}
       }
 
       if (totalFilesCommitted === 0) {
-        actionsPerformed.push(`O código do repositório no GitHub (${ghRepo}) já atende aos requisitos solicitados.`);
+        throw new Error(`Nenhuma alteração de código foi gerada ou comitada no repositório ${ghRepo}. Execução retida para evitar falso positivo.`);
       }
 
       await ticketStore.updateTicketProgress(ticket.id, 50, '🛠️ Raciocínio de IA concluído e código-fonte atualizado no repositório GitHub...');

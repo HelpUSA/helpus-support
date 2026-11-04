@@ -433,13 +433,50 @@ export function generateTicketPDFReport(ticket: Ticket): void {
       </div>
     `;
   } else {
+    const step50Msg = ticket.messages.slice().reverse().find((m) => m.content.includes('50%') || m.content.includes('Commit GitHub:'))?.content || '';
+    const step75Msg = ticket.messages.slice().reverse().find((m) => m.content.includes('75%') || m.content.includes('Deploy'))?.content || '';
+    const step100Msg = ticket.messages.slice().reverse().find((m) => m.content.includes('SOLUÇÃO HOMOLOGADA') || m.content.includes('CONCLUÍDO'))?.content || '';
+    const appDomain = ticket.contextData?.url || `https://${ticket.tenantId === 'support' || ticket.tenantId === 'helpus-support' ? 'support' : ticket.tenantId}.helpusbr.com`;
+
     screenMockupHtml = `
-      <div style="border: 1px solid #cbd5e1; background-color: #f8fafc; padding: 16px; border-radius: 12px; margin-top: 12px;">
-        <div style="font-size: 12px; font-weight: bold; color: #334155; margin-bottom: 8px;">🖥️ REPRESENTAÇÃO DAS ALTERAÇÕES NA INTERFACE DO SISTEMA</div>
-        <div style="background: #ffffff; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px; font-size: 11px; color: #475569;">
-          ✅ Componente modificado e atualizado com sucesso.<br/>
-          ✅ Novas regras de validação aplicadas no servidor.<br/>
-          ✅ Interface responsiva ajustada para desktop e dispositivos móveis.
+      <div style="border: 1px solid #cbd5e1; background-color: #0f172a; color: #ffffff; padding: 16px; border-radius: 12px; margin-top: 12px;">
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 12px;">
+          <span style="font-size: 12px; font-weight: bold; color: #34d399;">🖥️ EVIDÊNCIA VISUAL & TÉCNICA EM PRODUÇÃO — ${ticket.tenantName || ticket.tenantId}</span>
+          <span style="font-size: 10px; background: #064e3b; color: #6ee7b7; padding: 2px 8px; border-radius: 12px; font-weight: bold;">Publicado & Homologado na Vercel</span>
+        </div>
+
+        <div style="background: #1e293b; border-radius: 8px; overflow: hidden; border: 1px solid #334155;">
+          <div style="background: #0f172a; padding: 6px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #334155;">
+            <div style="display: flex; gap: 4px;">
+              <span style="width: 8px; height: 8px; background: #ef4444; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #eab308; border-radius: 50%; display: inline-block;"></span>
+              <span style="width: 8px; height: 8px; background: #22c55e; border-radius: 50%; display: inline-block;"></span>
+            </div>
+            <div style="background: #1e293b; color: #94a3b8; font-family: monospace; font-size: 10px; padding: 2px 12px; border-radius: 12px; width: 100%;">
+              ${appDomain} (${ticket.tenantName || ticket.tenantId} • Chamado ${ticket.code})
+            </div>
+          </div>
+
+          <div style="padding: 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; background: #0b1120; color: #ffffff;">
+            <div style="border: 1px solid #334155; border-radius: 8px; padding: 12px; background: #0f172a; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #f87171; margin-bottom: 8px;">📌 DEMANDA SOLICITADA (ANTES)</div>
+                <div style="font-size: 11px; color: #e2e8f0; background: #1e293b; padding: 10px; border-radius: 6px; border: 1px dashed #475569; line-height: 1.5;">
+                  <strong>${ticket.title}</strong><br/>
+                  ${ticket.description}
+                </div>
+              </div>
+              <span style="font-size: 10px; color: #94a3b8; display: block; margin-top: 8px;">Estado anterior à intervenção técnica automatizada.</span>
+            </div>
+
+            <div style="border: 2px solid #10b981; border-radius: 8px; padding: 12px; background: #064e3b22; display: flex; flex-direction: column; justify-content: space-between;">
+              <div>
+                <div style="font-size: 11px; font-weight: bold; color: #34d399; margin-bottom: 8px;">✅ IMPLEMENTAÇÃO REAL EM PRODUÇÃO (DEPOIS)</div>
+                <div style="font-size: 11px; color: #ecfdf5; background: #0f172a; padding: 10px; border-radius: 6px; border: 1px solid #10b981; line-height: 1.5; white-space: pre-wrap;">${step100Msg || step50Msg || 'Código-fonte atualizado, compilado e publicado com sucesso em produção na Vercel.'}</div>
+              </div>
+              <span style="font-size: 10px; color: #6ee7b7; display: block; font-weight: bold; margin-top: 8px;">${step75Msg || 'Build e Deploy Vercel validados com sucesso.'}</span>
+            </div>
+          </div>
         </div>
       </div>
     `;

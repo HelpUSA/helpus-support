@@ -1022,7 +1022,7 @@ export class TicketStore {
 
     // PERSISTÊNCIA CONFIRMADA: Commit no cache local e emissão de side effects
     this.save();
-    notificationService.notifyTicketCreated(newTicket);
+    await notificationService.notifyTicketCreated(newTicket);
     return newTicket;
   }
 
@@ -1147,7 +1147,7 @@ export class TicketStore {
 
     // PERSISTÊNCIA CONFIRMADA: Atualiza arquivo local e dispara notificações
     this.save();
-    notificationService.notifyTicketUpdated(
+    await notificationService.notifyTicketUpdated(
       ticket,
       `✅ Solicitação [${ticket.code}] aprovada e aguardando início de execução confirmado.`
     );
@@ -1618,12 +1618,12 @@ export class TicketStore {
     // PERSISTÊNCIA CONFIRMADA: Commit no cache local e envio de notificação
     this.save();
     if (workerResult.success) {
-      notificationService.notifyTicketUpdated(
+      await notificationService.notifyTicketUpdated(
         ticket,
-        `🎉 Solicitação [${ticket.code}] Aprovada e SOLUCIONADA/CONCLUÍDA com Sucesso no Sistema!`
+        workerResult.solutionMessage || `🎉 Solicitação [${ticket.code}] Aprovada e SOLUCIONADA/CONCLUÍDA com Sucesso no Sistema!`
       );
     } else {
-      notificationService.notifyTicketUpdated(
+      await notificationService.notifyTicketUpdated(
         ticket,
         `⚠️ Alerta de Erro de Implantação no Chamado [${ticket.code}]. Retornado para Em Atendimento.`
       );
@@ -1654,7 +1654,7 @@ export class TicketStore {
     }
 
     this.save();
-    notificationService.notifyTicketUpdated(ticket, `❌ *Solicitação Recusada pelo Administrador HelpUS (${agentName})*\n\n**Motivo da Recusa:**\n${rejectionReason}`);
+    await notificationService.notifyTicketUpdated(ticket, `❌ *Solicitação Recusada pelo Administrador HelpUS (${agentName})*\n\n**Motivo da Recusa:**\n${rejectionReason}`);
     return ticket;
   }
 

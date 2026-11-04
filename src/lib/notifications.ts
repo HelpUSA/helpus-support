@@ -12,7 +12,7 @@ export interface NotificationLog {
 }
 
 export const NOTIFICATION_CONFIG = {
-  emailTarget: EMAIL_CONFIG.masterTarget, // helpusbr.ecommerce@gmail.com
+  emailTarget: EMAIL_CONFIG.masterTarget, // helpus.ecommerce@gmail.com
 };
 
 class NotificationService {
@@ -41,7 +41,7 @@ class NotificationService {
     return [...this.logs];
   }
 
-  notifyTicketCreated(ticket: Ticket): NotificationLog {
+  async notifyTicketCreated(ticket: Ticket): Promise<NotificationLog> {
     const emailSubject = `[HelpUS Support] 🔔 Solicitação ${ticket.code} Aguardando Aprovação — ${ticket.tenantName}: ${ticket.title}`;
     const emailBody = `
 ==================================================
@@ -78,13 +78,17 @@ https://support.helpusbr.com/portal (Faça login como "helpus")
     this.logs.unshift(log);
     this.save();
 
-    // Trigger async email dispatch to helpusbr.ecommerce@gmail.com
-    emailService.sendNewTicketEmail(ticket).catch((err) => console.error(err));
+    // Await email dispatch so serverless runtime does not freeze before SMTP completes
+    try {
+      await emailService.sendNewTicketEmail(ticket);
+    } catch (err) {
+      console.error(err);
+    }
 
     return log;
   }
 
-  notifyTicketUpdated(ticket: Ticket, messageOrSolution?: string): NotificationLog {
+  async notifyTicketUpdated(ticket: Ticket, messageOrSolution?: string): Promise<NotificationLog> {
     const solutionText = messageOrSolution || 'Chamado processado e atualizado pela equipe HelpUS.';
 
     const emailSubject = `[HelpUS Support] 🟢 Chamado ${ticket.code} Atualizado/Solucionado — ${ticket.tenantName}`;
@@ -124,8 +128,14 @@ https://support.helpusbr.com/portal
     this.logs.unshift(log);
     this.save();
 
-    // Trigger async email dispatch
-    emailService.sendTicketStatusUpdateEmail(ticket, solutionText).catch((err) => console.error(err));
+    // Await email dispatch so serverless runtime does not freeze before SMTP completes
+    try {
+      if (ticket.status !== 'resolved') {
+        await emailService.sendTicketStatusUpdateEmail(ticket, solutionText);
+      }
+    } catch (err) {
+      console.error(err);
+    }
 
     return log;
   }

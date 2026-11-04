@@ -49,10 +49,10 @@ export async function POST(
     }
 
     const body = await request.json().catch(() => ({}));
-    const targetEmail = (body.email || ticket.createdByEmail || 'marychavesmcp@gmail.com').trim();
+    const targetEmail = (body.email || ticket.createdByEmail || 'helpus.ecommerce@gmail.com').trim();
 
     const solutionMsg = ticket.messages
-      .filter((m) => m.content.includes('[CONCLUÍDO & RESOLVIDO]'))
+      .filter((m) => m.content.includes('[CONCLUÍDO & RESOLVIDO]') || m.content.includes('[SOLUÇÃO HOMOLOGADA]'))
       .map((m) => m.content)
       .pop() || ticket.description;
 
@@ -60,6 +60,8 @@ export async function POST(
       {
         ...ticket,
         createdByEmail: targetEmail,
+        resolutionReport: body.resolutionReport || ticket.resolutionReport,
+        solutionCommitSha: body.commitSha || ticket.solutionCommitSha,
       },
       body.customMessage || solutionMsg
     );

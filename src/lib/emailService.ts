@@ -51,10 +51,10 @@ class EmailNotificationService {
     const subject = `[HelpUS Support] 🔔 Nova Solicitação ${ticket.code} — ${ticket.tenantName}: ${ticket.title}`;
 
     const htmlBody = `
-      <div style="font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; borderRadius: 16px;">
+      <div style="font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; border-radius: 16px;">
         <div style="border-bottom: 2px solid #6366f1; padding-bottom: 16px; margin-bottom: 20px;">
           <h2 style="color: #818cf8; margin: 0;">HelpUS Support Hub</h2>
-          <p style="color: #94a3b8; font-size: 14px; margin: 4px 0 0 0;">Alerta de Nova Solicitação de Atendimento</p>
+          <p style="color: #94a3b8; font-size: 14px; margin: 4px 0 0 0;">Alerta de Nova Solicitação de Atendimento (Aguardando Aprovação Master)</p>
         </div>
 
         <div style="background-color: #1e293b; padding: 16px; border-radius: 12px; margin-bottom: 20px;">
@@ -72,7 +72,7 @@ class EmailNotificationService {
 
         <div style="text-align: center; margin-top: 24px;">
           <a href="https://support.helpusbr.com/portal" style="background-color: #6366f1; color: #ffffff; padding: 12px 24px; font-weight: bold; border-radius: 8px; text-decoration: none; display: inline-block;">
-            👑 Acessar Área Master para Aprovar ou Rejeitar
+            👑 Acessar Área Master para Aprovar (Aceitar) ou Rejeitar
           </a>
         </div>
       </div>
@@ -118,6 +118,7 @@ class EmailNotificationService {
   async sendTicketResolvedEmail(ticket: Ticket, solutionText: string): Promise<EmailLog> {
     const recipients = [EMAIL_CONFIG.masterTarget, ticket.createdByEmail].filter(Boolean).join(', ');
     const subject = `[HelpUS Support] 🎉 Chamado ${ticket.code} Concluído & Resolvido — ${ticket.tenantName}`;
+    const rep = ticket.resolutionReport;
 
     const htmlBody = `
       <div style="font-family: Arial, sans-serif; background-color: #0f172a; color: #f8fafc; padding: 24px; border-radius: 16px; max-width: 680px; margin: 0 auto;">
@@ -131,7 +132,7 @@ class EmailNotificationService {
           <p style="margin: 6px 0;"><strong>🏢 Cliente / Sistema:</strong> ${ticket.tenantName}</p>
           <p style="margin: 6px 0;"><strong>👤 Solicitante:</strong> ${ticket.createdByName} (&lt;${ticket.createdByEmail}&gt;)</p>
           <p style="margin: 6px 0;"><strong>📌 Solicitação:</strong> ${ticket.title}</p>
-          <p style="margin: 6px 0;"><strong>📊 Status Final:</strong> <span style="color: #10b981; font-weight: bold; background: #064e3b; padding: 2px 8px; border-radius: 6px;">CONCLUÍDO &amp; RESOLVIDO</span></p>
+          <p style="margin: 6px 0;"><strong>📊 Status Final:</strong> <span style="color: #10b981; font-weight: bold; background: #064e3b; padding: 2px 8px; border-radius: 6px;">CONCLUÍDO &amp; RESOLVIDO (100%)</span></p>
           <p style="margin: 6px 0;"><strong>📅 Data de Resolução:</strong> ${new Date(ticket.updatedAt || new Date()).toLocaleString('pt-BR')}</p>
         </div>
 
@@ -146,14 +147,23 @@ class EmailNotificationService {
         <div style="background-color: #020617; padding: 18px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 24px;">
           <h4 style="color: #38bdf8; margin-top: 0;">✨ Detalhamento das Correções e Solução Técnica:</h4>
           <div style="color: #cbd5e1; white-space: pre-wrap; line-height: 1.6; font-size: 13px;">${solutionText}</div>
+          ${rep ? `
+          <div style="margin-top: 16px; padding-top: 14px; border-top: 1px solid #1e293b; font-size: 13px; color: #e2e8f0;">
+            <p style="margin: 6px 0;">📍 <strong>Local Exato do Site Alterado:</strong> ${rep.locationChanged || 'Interface da aplicação'}</p>
+            ${rep.visualBeforeDesc ? `<p style="margin: 6px 0; color: #fca5a5;">❌ <strong>Estado Anterior (Antes):</strong> ${rep.visualBeforeDesc}</p>` : ''}
+            ${rep.visualAfterDesc ? `<p style="margin: 6px 0; color: #6ee7b7;">✅ <strong>Estado Atual em Produção (Depois):</strong> ${rep.visualAfterDesc}</p>` : ''}
+            ${rep.commitSha ? `<p style="margin: 6px 0;">📦 <strong>Commit GitHub:</strong> <code>${rep.commitSha}</code> (${(rep.modifiedFiles || []).join(', ')})</p>` : ''}
+            ${rep.howToTest ? `<p style="margin: 6px 0; color: #a5b4fc;">🔍 <strong>Onde e Como Testar:</strong> ${rep.howToTest}</p>` : ''}
+          </div>
+          ` : ''}
         </div>
 
         <div style="background-color: #1e1b4b; border: 1px solid #4338ca; padding: 16px; border-radius: 12px; margin-bottom: 24px; text-align: center;">
           <p style="color: #c7d2fe; font-size: 14px; margin-top: 0; margin-bottom: 12px;">
-            Acesse a aplicação atualizada ou baixe o laudo técnico completo em PDF:
+            Acesse a aplicação atualizada ou baixe o laudo técnico completo em PDF (com os prints Antes/Depois):
           </p>
           <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap;">
-            <a href="${ticket.contextData?.url || (ticket.tenantId === 'neuro.eduardomagalhaes' ? 'https://neuro.eduardomagalhaes.helpusbr.com' : 'https://support.helpusbr.com/portal')}" style="background-color: #4f46e5; color: #ffffff; padding: 10px 20px; font-weight: bold; border-radius: 8px; text-decoration: none; display: inline-block;">
+            <a href="${rep?.targetUrl || ticket.contextData?.url || 'https://support.helpusbr.com'}" style="background-color: #4f46e5; color: #ffffff; padding: 10px 20px; font-weight: bold; border-radius: 8px; text-decoration: none; display: inline-block;">
               🌐 Acessar ${ticket.tenantName || 'Aplicação'}
             </a>
             <a href="https://support.helpusbr.com/portal" style="background-color: #10b981; color: #ffffff; padding: 10px 20px; font-weight: bold; border-radius: 8px; text-decoration: none; display: inline-block;">

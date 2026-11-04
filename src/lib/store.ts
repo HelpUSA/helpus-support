@@ -484,11 +484,23 @@ export function mergeTicketsGranular(remoteTickets: Ticket[], localTickets: Tick
       const remoteUpdated = remoteT.updatedAt || '';
       const baseTicket = (localUpdated >= remoteUpdated) ? localT : remoteT;
 
+      const mergedAttMap = new Map<string, Attachment>();
+      for (const a of (remoteT.attachments || [])) {
+        mergedAttMap.set(a.id || a.name, a);
+      }
+      for (const a of (localT.attachments || [])) {
+        mergedAttMap.set(a.id || a.name, a);
+      }
+      const mergedAttachments = Array.from(mergedAttMap.values());
+
       map.set(localT.id, {
         ...baseTicket,
         status: lifecycle.status,
         progressPercentage: lifecycle.progressPercentage,
         reopenedAt: lifecycle.reopenedAt || baseTicket.reopenedAt,
+        solutionCommitSha: localT.solutionCommitSha || remoteT.solutionCommitSha,
+        resolutionReport: localT.resolutionReport || remoteT.resolutionReport,
+        attachments: mergedAttachments,
         messages: mergedMessages,
         events: mergedEvents,
       });
@@ -1149,6 +1161,9 @@ export class TicketStore {
       success: boolean;
       solutionMessage: string;
       error?: string;
+      commitSha?: string;
+      resolutionReport?: any;
+      attachments?: Attachment[];
     },
     options?: { deferSideEffects?: boolean }
   ): Ticket | undefined {
@@ -1159,16 +1174,33 @@ export class TicketStore {
 
     if (workerResult.success) {
       ticket.status = 'resolved';
-      ticket.messages.push({
-        id: `msg-res-${Date.now()}`,
-        ticketId: ticket.id,
-        senderId: 'ia.engine@helpusbr.com',
-        senderName: 'IA Autônoma (HelpUS Tech)',
-        senderRole: 'agent',
-        isInternalNote: false,
-        content: workerResult.solutionMessage,
-        createdAt: new Date().toISOString(),
-      });
+      ticket.progressPercentage = 100;
+      if (workerResult.commitSha) {
+        ticket.solutionCommitSha = workerResult.commitSha;
+      }
+      if (workerResult.resolutionReport) {
+        ticket.resolutionReport = workerResult.resolutionReport;
+      }
+      if (Array.isArray(workerResult.attachments) && workerResult.attachments.length > 0) {
+        const existingAtts = ticket.attachments || [];
+        const attMap = new Map<string, Attachment>();
+        for (const a of existingAtts) attMap.set(a.id || a.name, a);
+        for (const a of workerResult.attachments) attMap.set(a.id || a.name, a);
+        ticket.attachments = Array.from(attMap.values());
+      }
+      const lastMsg = ticket.messages[ticket.messages.length - 1];
+      if (!lastMsg || !lastMsg.content.includes(workerResult.solutionMessage.slice(0, 40))) {
+        ticket.messages.push({
+          id: `msg-res-${Date.now()}`,
+          ticketId: ticket.id,
+          senderId: 'ia.engine@helpusbr.com',
+          senderName: 'IA Autônoma (HelpUS Tech)',
+          senderRole: 'agent',
+          isInternalNote: false,
+          content: workerResult.solutionMessage,
+          createdAt: new Date().toISOString(),
+        });
+      }
 
       const resEvt: TicketEvent = {
         id: `evt-res-${Date.now()}`,
@@ -1565,6 +1597,9 @@ export class TicketStore {
       success: boolean;
       solutionMessage: string;
       error?: string;
+      commitSha?: string;
+      resolutionReport?: any;
+      attachments?: Attachment[];
     }
   ): Promise<Ticket | undefined> {
     // P0-B: Transação atômica com rollback do cache em memória

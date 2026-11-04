@@ -223,6 +223,9 @@ export async function PATCH(
       const updated = await ticketStore.completeTicketProductionAsync(id, {
         success: true,
         solutionMessage: body.solutionMessage || '✨ Chamado concluído e solucionado com sucesso em produção.',
+        commitSha: body.commitSha,
+        resolutionReport: body.resolutionReport,
+        attachments: body.attachments,
       });
       if (!updated) {
         return NextResponse.json(

@@ -899,6 +899,10 @@ export default function ClientPortalPage() {
                 {isMasterUser ? (
                   <span className="flex items-center gap-1.5 text-purple-300">
                     👑 Painel Master HelpUS
+                    <span className="text-[10px] font-bold tracking-wide px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-full inline-flex items-center gap-1.5 ml-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      v3.0 Ativo
+                    </span>
                   </span>
                 ) : (
                   `Portal do Cliente — ${user.tenantName || 'Public Arte'}`
@@ -1671,6 +1675,58 @@ export default function ClientPortalPage() {
                 ) : (
                   <div className="p-3 bg-slate-950/50 rounded-xl text-xs text-slate-400 italic">
                     ⏳ Em atendimento autônomo. A resposta será gravada aqui em instantes.
+                  </div>
+                )}
+
+                {selectedTicket.resolutionReport && (
+                  <div className="mt-3 p-4 bg-slate-950/90 border border-emerald-500/30 rounded-xl space-y-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
+                      <span className="font-extrabold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                        📸 Evidências Visuais & Detalhamento dos Locais Alterados
+                      </span>
+                      {selectedTicket.resolutionReport.commitSha && (
+                        <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                          Commit GitHub: {selectedTicket.resolutionReport.commitSha}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                      <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase block mb-1">1. Local do Site Alterado</span>
+                        <p className="text-slate-200 leading-relaxed">{selectedTicket.resolutionReport.locationChanged}</p>
+                      </div>
+                      <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-emerald-400 uppercase block mb-1">2. O Que Foi Feito</span>
+                        <p className="text-slate-200 leading-relaxed">{selectedTicket.resolutionReport.summary}</p>
+                      </div>
+                      <div className="p-2.5 bg-slate-900/90 border border-slate-800 rounded-lg">
+                        <span className="text-[10px] font-bold text-amber-400 uppercase block mb-1">3. Onde e Como Testar</span>
+                        <p className="text-slate-200 leading-relaxed">{selectedTicket.resolutionReport.howToTest}</p>
+                      </div>
+                    </div>
+
+                    {(selectedTicket.resolutionReport.comparisonPrintUrl || selectedTicket.resolutionReport.afterPrintUrl) && (
+                      <div className="space-y-2 pt-1">
+                        {selectedTicket.resolutionReport.comparisonPrintUrl && (
+                          <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5">
+                            <span className="text-[11px] font-bold text-sky-400 block">
+                              🖥️ Print Comparativo Antes vs. Depois do Local Alterado ({selectedTicket.tenantName})
+                            </span>
+                            <a href={selectedTicket.resolutionReport.comparisonPrintUrl} target="_blank" rel="noreferrer">
+                              <img
+                                src={selectedTicket.resolutionReport.comparisonPrintUrl}
+                                alt="Print Comparativo Local Alterado"
+                                className="w-full max-h-80 object-contain rounded-lg border border-slate-700 bg-slate-950"
+                              />
+                            </a>
+                            <p className="text-[11px] text-slate-300 leading-relaxed">
+                              <strong>Descrição da Alteração:</strong> {selectedTicket.resolutionReport.visualAfterDesc}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

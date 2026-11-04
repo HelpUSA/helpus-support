@@ -47,6 +47,8 @@ export interface Attachment {
   url: string;
   type: string;
   size: number;
+  description?: string;
+  stage?: 'client_upload' | 'before_print' | 'after_print' | 'evidence_comparison';
 }
 
 export interface Message {
@@ -75,6 +77,21 @@ export interface TicketContext {
   extraMeta?: Record<string, any>;
 }
 
+export interface ResolutionReport {
+  summary: string;
+  locationChanged: string;
+  howToTest: string;
+  visualBeforeDesc: string;
+  visualAfterDesc: string;
+  commitSha?: string;
+  modifiedFiles?: string[];
+  deployUrl?: string;
+  targetUrl?: string;
+  beforePrintUrl?: string;
+  afterPrintUrl?: string;
+  comparisonPrintUrl?: string;
+}
+
 export interface Ticket {
   aiBridgeOrchestrated?: boolean;
   id: string;
@@ -101,5 +118,6 @@ export interface Ticket {
   progressStep?: string; // Current step description
   reopenedAt?: string;
   solutionCommitSha?: string;
+  resolutionReport?: ResolutionReport;
   events?: TicketEvent[];
 }

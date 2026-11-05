@@ -56,6 +56,16 @@ export async function POST(
       .map((m) => m.content)
       .pop() || ticket.description;
 
+    const extraAttachments: Array<{ filename: string; content: Buffer; contentType?: string }> = [];
+    if (body.pdfBase64 && typeof body.pdfBase64 === 'string') {
+      const cleanB64 = body.pdfBase64.replace(/^data:application\/pdf;base64,/, '');
+      extraAttachments.push({
+        filename: body.pdfFilename || `Relatorio_Tecnico_${ticket.code}.pdf`,
+        content: Buffer.from(cleanB64, 'base64'),
+        contentType: 'application/pdf',
+      });
+    }
+
     const emailLog = await emailService.sendTicketResolvedEmail(
       {
         ...ticket,
@@ -63,12 +73,13 @@ export async function POST(
         resolutionReport: body.resolutionReport || ticket.resolutionReport,
         solutionCommitSha: body.commitSha || ticket.solutionCommitSha,
       },
-      body.customMessage || solutionMsg
+      body.customMessage || solutionMsg,
+      extraAttachments.length > 0 ? extraAttachments : undefined
     );
 
     return NextResponse.json({
       success: true,
-      message: `E-mail enviado com sucesso para ${targetEmail}`,
+      message: `E-mail enviado com sucesso para ${emailLog.recipient}`,
       log: emailLog,
     });
   } catch (error: any) {

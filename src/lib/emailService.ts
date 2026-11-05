@@ -82,7 +82,12 @@ class EmailNotificationService {
   }
 
   async sendTicketStatusUpdateEmail(ticket: Ticket, statusText: string): Promise<EmailLog> {
-    const recipients = [EMAIL_CONFIG.masterTarget, ticket.createdByEmail].filter(Boolean).join(', ');
+    const isEduardoTicket = ticket.tenantId === 'neuro.eduardomagalhaes' || ticket.createdByEmail?.toLowerCase() === 'eduardojcmagalhaes@gmail.com';
+    const recipientList = [EMAIL_CONFIG.masterTarget, ticket.createdByEmail];
+    if (isEduardoTicket) {
+      recipientList.push('eduardojcmagalhaes@gmail.com');
+    }
+    const recipients = Array.from(new Set(recipientList.filter(Boolean))).join(', ');
     const subject = `[HelpUS Support] 🟢 Chamado ${ticket.code} Atualizado — Status: ${(ticket.status || 'pending_approval').toUpperCase()}`;
 
     const htmlBody = `
@@ -115,8 +120,17 @@ class EmailNotificationService {
     return this.dispatch(ticket.id, recipients, subject, htmlBody);
   }
 
-  async sendTicketResolvedEmail(ticket: Ticket, solutionText: string): Promise<EmailLog> {
-    const recipients = [EMAIL_CONFIG.masterTarget, ticket.createdByEmail].filter(Boolean).join(', ');
+  async sendTicketResolvedEmail(
+    ticket: Ticket,
+    solutionText: string,
+    extraAttachments?: Array<{ filename: string; content: Buffer; contentType?: string }>
+  ): Promise<EmailLog> {
+    const isEduardoTicket = ticket.tenantId === 'neuro.eduardomagalhaes' || ticket.createdByEmail?.toLowerCase().includes('eduardojcmagalhaes@gmail.com');
+    const recipientList = [EMAIL_CONFIG.masterTarget, ticket.createdByEmail];
+    if (isEduardoTicket) {
+      recipientList.push('eduardojcmagalhaes@gmail.com');
+    }
+    const recipients = Array.from(new Set(recipientList.filter(Boolean))).join(', ');
     const subject = `[HelpUS Support] 🎉 Chamado ${ticket.code} Concluído & Resolvido — ${ticket.tenantName}`;
     const rep = ticket.resolutionReport;
 
@@ -178,7 +192,7 @@ class EmailNotificationService {
       </div>
     `;
 
-    return this.dispatch(ticket.id, recipients, subject, htmlBody);
+    return this.dispatch(ticket.id, recipients, subject, htmlBody, extraAttachments);
   }
 
   async sendTicketCancelledEmail(ticket: Ticket, cancellationReason: string, cancelledByName: string): Promise<EmailLog> {
@@ -231,7 +245,13 @@ class EmailNotificationService {
     return Array.from(new Set(cleanedList)).join(', ');
   }
 
-  private async dispatch(ticketId: string, recipient: string, subject: string, htmlBody: string): Promise<EmailLog> {
+  private async dispatch(
+    ticketId: string,
+    recipient: string,
+    subject: string,
+    htmlBody: string,
+    attachments?: Array<{ filename: string; content: Buffer; contentType?: string }>
+  ): Promise<EmailLog> {
     const finalRecipient = this.cleanRecipientEmail(recipient);
 
     const log: EmailLog = {
@@ -252,6 +272,7 @@ class EmailNotificationService {
           to: finalRecipient,
           subject,
           html: htmlBody,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
         });
         log.status = 'sent';
       } catch (err) {

@@ -41,7 +41,37 @@ import CookieConsent from '@/components/CookieConsent';
 import PrivacyPolicyModal from '@/components/PrivacyPolicyModal';
 import UserManagementModal from '@/components/UserManagementModal';
 import SearchableTenantSelect from '@/components/SearchableTenantSelect';
+import AuthModal from '@/components/AuthModal';
+import { DICTIONARY } from '@/lib/i18n';
 import { Users } from 'lucide-react';
+
+function saveTicketsCacheSafely(ticketsList: Ticket[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    const lightweightList = ticketsList.map((t) => ({
+      ...t,
+      attachments: (t.attachments || []).map((a) => ({
+        ...a,
+        url: a.url && a.url.length > 2048 ? '' : a.url,
+      })),
+      resolutionReport: t.resolutionReport
+        ? {
+            ...t.resolutionReport,
+            beforePrintUrl: undefined,
+            afterPrintUrl: undefined,
+            comparisonPrintUrl: undefined,
+          }
+        : undefined,
+    }));
+    localStorage.setItem('helpus_client_tickets_cache_v5', JSON.stringify(lightweightList));
+  } catch (cacheErr) {
+    try {
+      localStorage.removeItem('helpus_client_tickets_cache_v4');
+      localStorage.removeItem('helpus_client_tickets_cache_v3');
+      localStorage.removeItem('helpus_client_tickets_cache_v5');
+    } catch {}
+  }
+}
 
 export default function ClientPortalPage() {
   const [user, setUser] = useState<UserAccount | null>(null);
@@ -235,9 +265,7 @@ export default function ClientPortalPage() {
       if (data.success) {
         failureCountRef.current = 0; // Recuperação e reset de falhas
         fetchedTickets = data.data;
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('helpus_client_tickets_cache_v5', JSON.stringify(fetchedTickets));
-        }
+        saveTicketsCacheSafely(fetchedTickets);
       } else {
         failureCountRef.current += 1;
         if (typeof window !== 'undefined') {
@@ -398,10 +426,12 @@ export default function ClientPortalPage() {
 
         // Immediately persist to client cache so ticket NEVER disappears
         if (typeof window !== 'undefined') {
-          const cached = localStorage.getItem('helpus_client_tickets_cache_v5');
-          let localList: Ticket[] = cached ? JSON.parse(cached) : [];
-          localList.unshift(newTicket);
-          localStorage.setItem('helpus_client_tickets_cache_v5', JSON.stringify(localList));
+          try {
+            const cached = localStorage.getItem('helpus_client_tickets_cache_v5');
+            let localList: Ticket[] = cached ? JSON.parse(cached) : [];
+            localList.unshift(newTicket);
+            saveTicketsCacheSafely(localList);
+          } catch {}
         }
 
         setTitle('');
@@ -825,7 +855,8 @@ export default function ClientPortalPage() {
       });
       const data = await res.json();
       if (data.success) {
-        setStatusAlert(`📧 Laudo técnico enviado com sucesso para ${ticket.createdByEmail}!`);
+        const recipientsLabel = data.log?.recipient || ticket.createdByEmail;
+        setStatusAlert(`📧 Laudo técnico enviado com sucesso para ${recipientsLabel}!`);
         setTimeout(() => setStatusAlert(null), 6000);
       } else {
         alert(data.error || 'Erro ao enviar e-mail');
@@ -881,7 +912,29 @@ export default function ClientPortalPage() {
     }
   };
 
-  if (!user) return null;
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 font-sans">
+        <AuthModal
+          isOpen={true}
+          onClose={() => {
+            window.location.href = '/';
+          }}
+          onSuccessLogin={(loggedInUser) => {
+            setUser(loggedInUser);
+            const nextTenant =
+              loggedInUser.role === 'super_admin' || loggedInUser.role === 'admin'
+                ? 'all'
+                : loggedInUser.tenantId || 'publicarte';
+            setTenantFilter(nextTenant);
+            tenantFilterRef.current = nextTenant;
+            loadTickets(nextTenant, true);
+          }}
+          t={DICTIONARY.pt.auth}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200 max-w-full overflow-x-hidden">
@@ -1600,13 +1653,30 @@ export default function ClientPortalPage() {
                   {selectedTicket.description}
                 </p>
 
-                {selectedTicket.attachments && selectedTicket.attachments.length > 0 && (
+                {selectedTicket.attachments &&
+                  selectedTicket.attachments.filter(
+                    (att) =>
+                      !att.stage ||
+                      (att.stage !== 'evidence_comparison' &&
+                        att.stage !== 'after_print' &&
+                        att.stage !== 'before_print' &&
+                        !att.name?.startsWith('[PRINT'))
+                  ).length > 0 && (
                   <div className="pt-2 border-t border-slate-900 flex flex-wrap gap-2">
-                    {selectedTicket.attachments.map((att) => (
-                      <a key={att.id} href={att.url} target="_blank" rel="noreferrer">
-                        <img src={att.url} alt={att.name} className="h-28 rounded-xl object-cover border border-slate-700 hover:border-indigo-400" />
-                      </a>
-                    ))}
+                    {selectedTicket.attachments
+                      .filter(
+                        (att) =>
+                          !att.stage ||
+                          (att.stage !== 'evidence_comparison' &&
+                            att.stage !== 'after_print' &&
+                            att.stage !== 'before_print' &&
+                            !att.name?.startsWith('[PRINT'))
+                      )
+                      .map((att) => (
+                        <a key={att.id} href={att.url} target="_blank" rel="noreferrer">
+                          <img src={att.url} alt={att.name} className="h-28 rounded-xl object-cover border border-slate-700 hover:border-indigo-400" />
+                        </a>
+                      ))}
                   </div>
                 )}
               </div>
@@ -1707,7 +1777,7 @@ export default function ClientPortalPage() {
                     </div>
 
                     {(selectedTicket.resolutionReport.comparisonPrintUrl || selectedTicket.resolutionReport.afterPrintUrl) && (
-                      <div className="space-y-2 pt-1">
+                      <div className="space-y-2.5 pt-1">
                         {selectedTicket.resolutionReport.comparisonPrintUrl && (
                           <div className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5">
                             <span className="text-[11px] font-bold text-sky-400 block">
@@ -1717,7 +1787,7 @@ export default function ClientPortalPage() {
                               <img
                                 src={selectedTicket.resolutionReport.comparisonPrintUrl}
                                 alt="Print Comparativo Local Alterado"
-                                className="w-full max-h-80 object-contain rounded-lg border border-slate-700 bg-slate-950"
+                                className="w-full max-h-96 object-contain rounded-lg border border-slate-700 bg-slate-950"
                               />
                             </a>
                             <p className="text-[11px] text-slate-300 leading-relaxed">
@@ -1725,6 +1795,41 @@ export default function ClientPortalPage() {
                             </p>
                           </div>
                         )}
+                        {selectedTicket.resolutionReport.afterPrintUrl &&
+                          selectedTicket.resolutionReport.afterPrintUrl !== selectedTicket.resolutionReport.comparisonPrintUrl && (
+                          <div className="p-2.5 bg-slate-900 border border-emerald-500/30 rounded-xl space-y-1.5">
+                            <span className="text-[11px] font-bold text-emerald-400 block">
+                              ✅ Print Real das Telas Alteradas em Produção ({selectedTicket.tenantName})
+                            </span>
+                            <a href={selectedTicket.resolutionReport.afterPrintUrl} target="_blank" rel="noreferrer">
+                              <img
+                                src={selectedTicket.resolutionReport.afterPrintUrl}
+                                alt="Print Real em Produção"
+                                className="w-full max-h-96 object-contain rounded-lg border border-emerald-500/30 bg-slate-950"
+                              />
+                            </a>
+                          </div>
+                        )}
+                        {(selectedTicket.attachments || [])
+                          .filter(
+                            (att) =>
+                              (att.stage === 'after_print' || att.stage === 'evidence_comparison' || att.name?.startsWith('[PRINT')) &&
+                              att.url !== selectedTicket.resolutionReport?.comparisonPrintUrl &&
+                              att.url !== selectedTicket.resolutionReport?.afterPrintUrl
+                          )
+                          .map((att) => (
+                            <div key={att.id} className="p-2.5 bg-slate-900 border border-slate-800 rounded-xl space-y-1.5">
+                              <span className="text-[11px] font-bold text-emerald-400 block">📸 {att.name}</span>
+                              <a href={att.url} target="_blank" rel="noreferrer">
+                                <img
+                                  src={att.url}
+                                  alt={att.name}
+                                  className="w-full max-h-96 object-contain rounded-lg border border-slate-700 bg-slate-950"
+                                />
+                              </a>
+                              {att.description && <p className="text-[11px] text-slate-300 leading-relaxed">{att.description}</p>}
+                            </div>
+                          ))}
                       </div>
                     )}
                   </div>

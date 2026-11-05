@@ -158,15 +158,18 @@ export function generateTicketPDFReport(ticket: Ticket): void {
   let printsGalleryHtml = '';
   if (report?.beforePrintUrl || report?.afterPrintUrl || report?.comparisonPrintUrl || evidencePrints.length > 0) {
     const cards: string[] = [];
+    const renderedUrls = new Set<string>();
 
     if (report?.beforePrintUrl && report?.afterPrintUrl) {
+      renderedUrls.add(report.beforePrintUrl);
+      renderedUrls.add(report.afterPrintUrl);
       cards.push(`
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
           <div style="border: 1px solid #475569; border-radius: 10px; padding: 12px; background: #0f172a; color: #f8fafc;">
             <div style="font-size: 11px; font-weight: 800; color: #f87171; margin-bottom: 8px; text-transform: uppercase;">
               ❌ PRINT ANTES DA ALTERAÇÃO — ${escapeHtml(appName)}
             </div>
-            <img src="${report.beforePrintUrl}" style="width: 100%; max-height: 260px; object-fit: contain; border-radius: 6px; border: 1px solid #334155; background: #020617;" alt="Print Antes" />
+            <img src="${report.beforePrintUrl}" style="width: 100%; max-height: 280px; object-fit: contain; border-radius: 6px; border: 1px solid #334155; background: #020617;" alt="Print Antes" />
             <div style="font-size: 11px; color: #cbd5e1; margin-top: 8px; line-height: 1.45;">
               <strong>Descrição do Local (Antes):</strong> ${escapeHtml(visualBeforeDesc)}
             </div>
@@ -176,7 +179,7 @@ export function generateTicketPDFReport(ticket: Ticket): void {
             <div style="font-size: 11px; font-weight: 800; color: #34d399; margin-bottom: 8px; text-transform: uppercase;">
               ✅ PRINT DEPOIS DA ALTERAÇÃO EM PRODUÇÃO — ${escapeHtml(appName)}
             </div>
-            <img src="${report.afterPrintUrl}" style="width: 100%; max-height: 260px; object-fit: contain; border-radius: 6px; border: 1px solid #10b981; background: #020617;" alt="Print Depois" />
+            <img src="${report.afterPrintUrl}" style="width: 100%; max-height: 280px; object-fit: contain; border-radius: 6px; border: 1px solid #10b981; background: #020617;" alt="Print Depois" />
             <div style="font-size: 11px; color: #ecfdf5; margin-top: 8px; line-height: 1.45;">
               <strong>Descrição do Local Alterado (Depois):</strong> ${escapeHtml(visualAfterDesc)}
             </div>
@@ -185,13 +188,14 @@ export function generateTicketPDFReport(ticket: Ticket): void {
       `);
     }
 
-    if (report?.comparisonPrintUrl) {
+    if (report?.comparisonPrintUrl && !renderedUrls.has(report.comparisonPrintUrl)) {
+      renderedUrls.add(report.comparisonPrintUrl);
       cards.push(`
         <div style="border: 1px solid #334155; border-radius: 10px; padding: 12px; background: #0f172a; color: #f8fafc; margin-bottom: 14px;">
           <div style="font-size: 11px; font-weight: 800; color: #38bdf8; margin-bottom: 8px;">
-            📸 CAPTURA VISUAL DETALHADA DO LOCAL ALTERADO (${escapeHtml(locationChanged)})
+            📸 CAPTURA VISUAL COMPARATIVA (ANTES vs. DEPOIS) — ${escapeHtml(locationChanged)}
           </div>
-          <img src="${report.comparisonPrintUrl}" style="width: 100%; max-height: 340px; object-fit: contain; border-radius: 8px; border: 1px solid #334155; background: #020617;" alt="Print Comparativo" />
+          <img src="${report.comparisonPrintUrl}" style="width: 100%; max-height: 360px; object-fit: contain; border-radius: 8px; border: 1px solid #334155; background: #020617;" alt="Print Comparativo" />
           <div style="font-size: 11px; color: #e2e8f0; margin-top: 8px; line-height: 1.45;">
             <strong>Local Exato Alterado:</strong> ${escapeHtml(locationChanged)}<br/>
             <strong>Descrição da Mudança Visual:</strong> ${escapeHtml(visualAfterDesc)}
@@ -200,20 +204,32 @@ export function generateTicketPDFReport(ticket: Ticket): void {
       `);
     }
 
+    if (report?.afterPrintUrl && !renderedUrls.has(report.afterPrintUrl)) {
+      renderedUrls.add(report.afterPrintUrl);
+      cards.push(`
+        <div style="border: 2px solid #10b981; border-radius: 10px; padding: 12px; background: #0f172a; color: #f8fafc; margin-bottom: 14px;">
+          <div style="font-size: 11px; font-weight: 800; color: #34d399; margin-bottom: 8px; text-transform: uppercase;">
+            ✅ PRINT REAL DAS TELAS ALTERADAS EM PRODUÇÃO — ${escapeHtml(appName)} (${escapeHtml(appDomain)})
+          </div>
+          <img src="${report.afterPrintUrl}" style="width: 100%; max-height: 440px; object-fit: contain; border-radius: 8px; border: 1px solid #10b981; background: #020617;" alt="Print Real em Produção" />
+          <div style="font-size: 11px; color: #ecfdf5; margin-top: 8px; line-height: 1.45;">
+            <strong>Descrição das Telas Capturadas em Produção:</strong> ${escapeHtml(visualAfterDesc)}
+          </div>
+        </div>
+      `);
+    }
+
     for (const evImg of evidencePrints) {
-      if (
-        evImg.url === report?.beforePrintUrl ||
-        evImg.url === report?.afterPrintUrl ||
-        evImg.url === report?.comparisonPrintUrl
-      ) {
+      if (renderedUrls.has(evImg.url)) {
         continue;
       }
+      renderedUrls.add(evImg.url);
       cards.push(`
         <div style="border: 1px solid #334155; border-radius: 10px; padding: 12px; background: #0f172a; color: #f8fafc; margin-bottom: 12px;">
           <div style="font-size: 11px; font-weight: 800; color: #34d399; margin-bottom: 6px;">
             🖥️ ${escapeHtml(evImg.name)}
           </div>
-          <img src="${evImg.url}" style="width: 100%; max-height: 320px; object-fit: contain; border-radius: 6px; border: 1px solid #334155; background: #020617;" alt="${escapeHtml(evImg.name)}" />
+          <img src="${evImg.url}" style="width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; border: 1px solid #334155; background: #020617;" alt="${escapeHtml(evImg.name)}" />
           <div style="font-size: 11px; color: #cbd5e1; margin-top: 8px; line-height: 1.45;">
             ${escapeHtml(evImg.description || visualAfterDesc)}
           </div>
